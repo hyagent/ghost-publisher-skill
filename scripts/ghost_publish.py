@@ -283,6 +283,14 @@ def markdown_to_html(md: str, title: Optional[str] = None) -> str:
         elif in_blockquote:
             close_blockquote()
         
+        # Handle horizontal rule (---, ***, ___)
+        if re.match(r'^\s*(-{3,}|\*{3,}|_{3,})\s*$', line):
+            close_lists()
+            close_blockquote()
+            out.append("<hr />")
+            i += 1
+            continue
+
         # Handle table (starts with |)
         if line.strip().startswith("|"):
             close_lists()

@@ -9,6 +9,8 @@ Use this skill to prepare and publish Ghost posts deterministically from the com
 
 ## Workflow
 
+### Standard Publishing Workflow
+
 1. **Draft first**: Always start with `--status draft` to create/update a draft.
 2. **Find existing post**: Before publishing, check if a post with the same title/slug already exists:
    ```bash
@@ -18,6 +20,40 @@ Use this skill to prepare and publish Ghost posts deterministically from the com
 4. **Verify slug**: Ensure slug follows the rule: short, lowercase English or short pinyin, no dates/punctuation. If not provided, script will auto-generate a compliant slug.
 5. **Publish**: Once the draft is ready, update with `--status published` using the same `--find-slug` to avoid creating a new post.
 6. Verify the returned JSON (`id`, `slug`, `url`, `status`).
+
+### Content Deduplication Workflow (Recommended)
+
+Use the built-in similarity detection to avoid creating duplicate or near-duplicate content:
+
+1. **Check for similar content before publishing**:
+   ```bash
+   python3 scripts/ghost_publish.py \
+     --title "AI 工具使用指南" \
+     --markdown-file draft.md \
+     --check-similar \
+     --auto-suggest \
+     --status draft
+   ```
+
+2. **Review similarity report**: The script will output:
+   - Similarity scores for existing posts
+   - Recommendation: update vs create new
+   - Suggested `--find-slug` if an update is recommended
+
+3. **Act on recommendation**:
+   - If similarity > 80%: Use `--find-slug <existing-slug>` to update
+   - If similarity 60-80%: Manual judgment required
+   - If similarity < 60%: Safe to create new post with `--force-create`
+
+4. **Force create** (when you know it's different enough):
+   ```bash
+   python3 scripts/ghost_publish.py \
+     --title "AI 工具使用指南" \
+     --markdown-file draft.md \
+     --check-similar \
+     --force-create \
+     --status draft
+   ```
 
 ## Rules
 
@@ -33,6 +69,8 @@ Use this skill to prepare and publish Ghost posts deterministically from the com
   - Avoid long phrases, dates, and punctuation in slugs
   - Verify auto-generated slugs are human-readable before publishing
 - When updating existing posts, **always use `--find-slug` or `--update-id`** to avoid creating duplicates
+- **Use `--check-similar`** when publishing new content to detect potential duplicates before they are created
+- **Prefer updating over creating**: If content similarity > 80%, update the existing post rather than creating a new one
 - Normalize markdown before publish so headings, blank lines, bullets, and numbered lists become clean HTML; never preserve raw duplicated list markers like `• - item` or `1. 1. item`.
 - When generating technical article content, default to objective writing: reduce subjective opinions, avoid labels like "simple/complex/easy/hard" unless attributed or clearly context-bound, and do not pre-judge the reader's knowledge.
 - Prefer concrete facts, process, constraints, results, evidence, pitfalls, and boundaries. Include these when they help the reader understand what was done and what the approach covers.
@@ -92,7 +130,26 @@ Author normalization (`_normalize_authors`):
 - The helper uploads images and replaces local references in HTML. Alt text is preserved from the original `<img>` tag or markdown `![]()` syntax.
 - The `--feature-image-alt` flag is provided for symmetry but is not transmitted to Ghost; consider including alt text in your HTML or lexical content directly.
 
+### Similarity Detection Options
+
+- `--check-similar`: Enable similarity detection before publishing
+- `--similarity-threshold`: Title similarity threshold (0-1, default: 0.7)
+- `--content-threshold`: Content similarity threshold (0-1, default: 0.5)
+- `--auto-suggest`: Auto-suggest update vs create based on similarity scores
+- `--force-create`: Force create new post even if similar posts exist
+
 ### Example usage
+
+**Check for similar posts before publishing:**
+
+```bash
+python3 scripts/ghost_publish.py \
+  --title "AI 工具使用指南" \
+  --markdown-file draft.md \
+  --check-similar \
+  --auto-suggest \
+  --status draft
+```
 
 **Publish a post:**
 
@@ -164,6 +221,10 @@ The `markdown_to_html()` function in `scripts/ghost_publish.py` has evolved thro
    - **Root cause**: `parse_table()` was defined before `inline()` in the same function scope, but Python closure rules prevented access
    - **Solution**: Pass `inline` as a parameter to `parse_table(lines, start_idx, inline_fn)`
    - **Result**: `**bold**` in table cells now correctly converts to `<strong>bold</strong>`
+4. **2026-04-05 fix**: Added support for horizontal rules:
+   - **Syntax**: `---`, `***`, or `___` (3 or more characters)
+   - **Output**: `<hr />`
+   - **Use case**: Section dividers in markdown content
 
 If you encounter formatting issues in published Ghost articles:
 1. Check if the markdown uses tables, blockquotes, or inline formatting within tables
@@ -176,11 +237,17 @@ If you encounter formatting issues in published Ghost articles:
    ```
 4. If not, extend the parser before publishing
 
-### Removing horizontal rules from markdown
+### Horizontal rules (thematic breaks)
 
-Markdown `---` lines (horizontal rules/thematic breaks) render as `<hr>` elements in Ghost. If these are unwanted visual clutter:
+Markdown `---`, `***`, or `___` lines are now supported and render as `<hr>` elements in Ghost.
+
+**Supported syntax:**
+- `---` (3 or more hyphens)
+- `***` (3 or more asterisks)
+- `___` (3 or more underscores)
+
+**If you want to remove horizontal rules** (e.g., they appear as unwanted visual clutter):
 - Remove them from the source markdown with: `sed -i '/^---$/d' draft.md`
-- Note: This removes _all_ standalone `---` lines, which are standard markdown thematic breaks
 - Consider using headings or spacing instead for section separation
 
 ### Verify with visual screenshot
@@ -202,14 +269,45 @@ Check for:
 
 When ready to publish:
 1. Fix all formatting issues in the draft
-2. Use `--find-slug` to update the correct post instead of creating duplicates:
+2. **Check for similar posts** (recommended):
    ```bash
    python3 scripts/ghost_publish.py \
      --title "Title" \
      --markdown-file draft.md \
-     --tag "Tag1" --tag "Tag2" \
-     --status published \
-     --use-source html \
-     --find-slug "existing-slug"
+     --check-similar \
+     --auto-suggest \
+     --status draft
    ```
-3. Verify the published URL and status in the JSON output
+3. Based on similarity report, either:
+   - Update existing: Use `--find-slug` to update the correct post
+   - Create new: Use `--force-create` if the content is sufficiently different
+4. Verify the published URL and status in the JSON output
+
+### Similarity Detection Algorithm
+
+The similarity detection uses a lightweight approach combining:
+
+1. **Title Similarity**: Sequence matching + containment detection
+   - Exact match: 100%
+   - One title contains the other: 90%
+   - Sequence similarity ratio for partial matches
+
+2. **Content Similarity**: Jaccard similarity on token sets
+   - Extracts tokens (Chinese characters + English words)
+   - Compares token set overlap
+   - Works on HTML content (automatically extracts text)
+
+3. **Combined Score**: Weighted average (title 60%, content 40%)
+
+**Thresholds:**
+- >= 80%: High similarity → Strongly recommend update
+- 60-79%: Medium similarity → Manual judgment
+- < 60%: Low similarity → Safe to create new
+
+### Content Deduplication Best Practices
+
+1. **Always use `--check-similar`** for new content
+2. **Review the similarity report** before deciding
+3. **Update existing posts** when similarity > 80%
+4. **Use consistent slugs** for related content series
+5. **Add tags** to distinguish similar but different topics
