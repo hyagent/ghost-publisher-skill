@@ -223,7 +223,7 @@ def markdown_to_html(md: str, title: Optional[str] = None) -> str:
 
         GFM table structure:
           Row 0: header cells  | col1 | col2 |
-          Row 1: separator     |------|------|  (must match r'^[\s|:\-]+$')
+          Row 1: separator     |------|------| (cells contain only dashes, colons, spaces)
           Row 2+: data rows
         """
         table_lines = []
