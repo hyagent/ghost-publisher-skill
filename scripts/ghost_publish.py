@@ -46,12 +46,15 @@ def _first_env(*names: str) -> str:
 
 def load_config() -> GhostConfig:
     host = _first_env("GHOST_ADMIN_HOST", "GHOST_HOST", "GHOST_ADMIN_URL", "GHOST_URL")
+    # GHOST_ADMIN_API_KEY takes priority — it is the custom integration key that
+    # supports write operations. GHOST_API_KEY is kept for backward compatibility
+    # but may be the read-only Content API key; prefer the admin key.
     api_key = _first_env("GHOST_ADMIN_API_KEY", "GHOST_API_KEY")
     api_version = _first_env("GHOST_API_VERSION") or DEFAULT_API_VERSION
     if not host:
         raise GhostPublishError("GHOST_HOST is required")
     if not api_key:
-        raise GhostPublishError("GHOST_API_KEY is required")
+        raise GhostPublishError("GHOST_ADMIN_API_KEY (or GHOST_API_KEY) is required")
     if ":" not in api_key:
         raise GhostPublishError("API key must be in the form <id>:<hex_secret>")
     key_id, secret = api_key.split(":", 1)
@@ -95,21 +98,29 @@ def session(cfg: GhostConfig) -> requests.Session:
     return s
 
 
-def upload_image(cfg: GhostConfig, path: Path, alt: str = "") -> str:
+def upload_image(cfg: GhostConfig, path: Path) -> str:
+    """Upload a local image to Ghost and return the remote URL.
+
+    Note: The Ghost Admin API images endpoint does NOT accept alt text or other
+    metadata — only the image file itself. Alt text must be embedded in the
+    post content (HTML img tag or lexical node).
+    """
     if not path.exists():
         raise GhostPublishError(f"image not found: {path}")
     url = urljoin(admin_base(cfg), "images/upload/")
+    suffix = path.suffix.lower()
+    mime_map = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+        ".svg": "image/svg+xml",
+    }
+    mime_type = mime_map.get(suffix, "application/octet-stream")
     with path.open("rb") as f:
-        # Ghost API requires explicit content type for file uploads
-        mime_type = "image/png" if path.suffix.lower() == ".png" else \
-                    "image/jpeg" if path.suffix.lower() in (".jpg", ".jpeg") else \
-                    "image/gif" if path.suffix.lower() == ".gif" else \
-                    "image/webp" if path.suffix.lower() == ".webp" else \
-                    "application/octet-stream"
         files = {"file": (path.name, f, mime_type)}
         data = {"ref": path.name}
-        if alt:
-            data["alt"] = alt
         resp = session(cfg).post(url, files=files, data=data, timeout=60)
     if resp.status_code >= 300:
         raise GhostPublishError(f"image upload failed: {resp.status_code} {resp.text[:500]}")
@@ -207,48 +218,54 @@ def markdown_to_html(md: str, title: Optional[str] = None) -> str:
         m = re.match(r"^\s*([-*]|\d+\.)\s+(.*)$", line)
         return m.group(2) if m else line
 
-    def parse_table(lines: List[str], start_idx: int, inline_fn) -> tuple[List[str], int]:
-        """Parse a markdown table starting at start_idx. Returns (html_lines, next_idx)."""
+    def parse_table(lines: List[str], start_idx: int, inline_fn) -> tuple:
+        """Parse a GFM table starting at start_idx. Returns (html_lines, next_idx).
+
+        GFM table structure:
+          Row 0: header cells  | col1 | col2 |
+          Row 1: separator     |------|------|  (must match r'^[\s|:\-]+$')
+          Row 2+: data rows
+        """
         table_lines = []
         i = start_idx
-        while i < len(lines) and lines[i].strip().startswith("|"):
+        while i < len(lines) and "|" in lines[i]:
             table_lines.append(lines[i])
             i += 1
+
+        # Need at least header + separator
         if len(table_lines) < 2:
             return ([], start_idx + 1)
-        
-        html_lines = ["<table>"]
-        header_parsed = False
-        
-        for row in table_lines:
-            cells = [c.strip() for c in row.split("|")]
-            cells = [c for c in cells if c or c == ""]
-            if cells and cells[0] == "":
+
+        def split_row(row: str) -> List[str]:
+            cells = row.split("|")
+            # Strip leading/trailing empty strings from outer pipes
+            if cells and not cells[0].strip():
                 cells = cells[1:]
-            if cells and cells[-1] == "":
+            if cells and not cells[-1].strip():
                 cells = cells[:-1]
-            
-            if not header_parsed:
-                html_lines.append("<thead><tr>")
-                for cell in cells:
-                    html_lines.append(f"<th>{inline_fn(cell)}</th>")
-                html_lines.append("</tr></thead><tbody>")
-                header_parsed = True
-            elif re.match(r"^[\s\-:|]+$", row):
-                continue
-            else:
-                html_lines.append("<tr>")
-                for cell in cells:
-                    html_lines.append(f"<td>{inline_fn(cell)}</td>")
-                html_lines.append("</tr>")
-        
+            return [c.strip() for c in cells]
+
+        html_lines = ["<table><thead><tr>"]
+        for cell in split_row(table_lines[0]):
+            html_lines.append(f"<th>{inline_fn(cell)}</th>")
+        html_lines.append("</tr></thead><tbody>")
+
+        # Skip separator row (row 1), then emit data rows
+        for row in table_lines[2:]:
+            if re.match(r"^[\s|:\-]+$", row):
+                continue  # skip any extra separator rows
+            html_lines.append("<tr>")
+            for cell in split_row(row):
+                html_lines.append(f"<td>{inline_fn(cell)}</td>")
+            html_lines.append("</tr>")
+
         html_lines.append("</tbody></table>")
         return (html_lines, i)
 
     i = 0
     while i < len(lines):
         line = lines[i]
-        
+
         if line.startswith("```"):
             close_lists()
             close_blockquote()
@@ -260,19 +277,18 @@ def markdown_to_html(md: str, title: Optional[str] = None) -> str:
                 in_code = True
             i += 1
             continue
-        
+
         if in_code:
             code_buf.append(line)
             i += 1
             continue
-        
+
         if not line.strip():
             close_lists()
             close_blockquote()
             i += 1
             continue
-        
-        # Handle blockquote
+
         if line.lstrip().startswith("> ") or line.strip() == ">":
             close_lists()
             if not in_blockquote:
@@ -282,8 +298,7 @@ def markdown_to_html(md: str, title: Optional[str] = None) -> str:
             continue
         elif in_blockquote:
             close_blockquote()
-        
-        # Handle horizontal rule (---, ***, ___)
+
         if re.match(r'^\s*(-{3,}|\*{3,}|_{3,})\s*$', line):
             close_lists()
             close_blockquote()
@@ -291,33 +306,24 @@ def markdown_to_html(md: str, title: Optional[str] = None) -> str:
             i += 1
             continue
 
-        # Handle table (starts with |)
-        if line.strip().startswith("|"):
+        if "|" in line:
             close_lists()
             close_blockquote()
             table_html, next_idx = parse_table(lines, i, inline)
             out.extend(table_html)
             i = next_idx
             continue
-        
-        if line.startswith("# "):
+
+        # Headings h1-h6
+        heading_match = re.match(r"^(#{1,6})\s+(.*)", line)
+        if heading_match:
             close_lists()
             close_blockquote()
-            out.append(f"<h1>{inline(line[2:])}</h1>")
+            level = len(heading_match.group(1))
+            out.append(f"<h{level}>{inline(heading_match.group(2))}</h{level}>")
             i += 1
             continue
-        if line.startswith("## "):
-            close_lists()
-            close_blockquote()
-            out.append(f"<h2>{inline(line[3:])}</h2>")
-            i += 1
-            continue
-        if line.startswith("### "):
-            close_lists()
-            close_blockquote()
-            out.append(f"<h3>{inline(line[4:])}</h3>")
-            i += 1
-            continue
+
         if re.match(r"^\s*[-*] ", line):
             close_blockquote()
             if in_ol:
@@ -336,12 +342,12 @@ def markdown_to_html(md: str, title: Optional[str] = None) -> str:
             out.append(f"<li>{inline(list_item_text(line))}</li>")
             i += 1
             continue
-        
+
         close_lists()
         close_blockquote()
         out.append(f"<p>{inline(line)}</p>")
         i += 1
-    
+
     close_lists()
     close_blockquote()
     if in_code:
@@ -358,7 +364,7 @@ def load_json_arg(value: Optional[str], path: Optional[Path]) -> Dict[str, Any]:
 
 
 def replace_local_image_refs(html: str, image_map: Dict[str, str]) -> str:
-    def repl(match: re.Match[str]) -> str:
+    def repl(match: re.Match) -> str:
         alt, src = match.group(1), match.group(2)
         if src in image_map:
             return f'<img alt="{html_escape(alt)}" src="{image_map[src]}" />'
@@ -380,29 +386,43 @@ def write_post(cfg: GhostConfig, post: Dict[str, Any], source: str, post_id: Opt
 
 
 def find_post(cfg: GhostConfig, *, post_id: Optional[str] = None, slug: Optional[str] = None, title: Optional[str] = None) -> Dict[str, Any]:
+    """Look up a post by ID, slug, or title.
+
+    - By ID: direct GET /posts/{id}/
+    - By slug: direct GET /posts/slug/{slug}/  (avoids full list fetch)
+    - By title: full list scan (Ghost has no title filter endpoint)
+    Raises GhostPublishError if not found.
+    """
     if post_id:
         url = urljoin(admin_base(cfg), f"posts/{post_id}/")
         resp = session(cfg).get(url, timeout=60)
+        if resp.status_code == 404:
+            raise GhostPublishError(f"post not found: id={post_id}")
         if resp.status_code >= 300:
             raise GhostPublishError(f"post lookup failed: {resp.status_code} {resp.text[:500]}")
         return resp.json()["posts"][0]
-    url = urljoin(admin_base(cfg), "posts/")
-    params = {"limit": "all", "fields": "id,title,slug,url,status"}
-    resp = session(cfg).get(url, params=params, timeout=60)
-    if resp.status_code >= 300:
-        raise GhostPublishError(f"post lookup failed: {resp.status_code} {resp.text[:500]}")
-    posts = resp.json().get("posts", [])
+
     if slug:
-        for post in posts:
-            if post.get("slug") == slug:
-                return post
+        url = urljoin(admin_base(cfg), f"posts/slug/{slug}/")
+        resp = session(cfg).get(url, timeout=60)
+        if resp.status_code == 404:
+            raise GhostPublishError(f"post not found: slug={slug}")
+        if resp.status_code >= 300:
+            raise GhostPublishError(f"post lookup failed: {resp.status_code} {resp.text[:500]}")
+        return resp.json()["posts"][0]
+
     if title:
-        for post in posts:
+        url = urljoin(admin_base(cfg), "posts/")
+        params = {"limit": "all", "fields": "id,title,slug,url,status,updated_at"}
+        resp = session(cfg).get(url, params=params, timeout=60)
+        if resp.status_code >= 300:
+            raise GhostPublishError(f"post lookup failed: {resp.status_code} {resp.text[:500]}")
+        for post in resp.json().get("posts", []):
             if post.get("title") == title:
                 return post
-    if not posts:
-        raise GhostPublishError("post not found")
-    return posts[0]
+        raise GhostPublishError(f"post not found: title={title!r}")
+
+    raise GhostPublishError("find_post requires post_id, slug, or title")
 
 
 def delete_post(cfg: GhostConfig, *, post_id: Optional[str] = None, slug: Optional[str] = None) -> str:
@@ -410,12 +430,12 @@ def delete_post(cfg: GhostConfig, *, post_id: Optional[str] = None, slug: Option
     if not post_id and not slug:
         raise GhostPublishError("delete requires --post-id or --slug")
     post = find_post(cfg, post_id=post_id, slug=slug)
-    post_id = post["id"]
-    url = urljoin(admin_base(cfg), f"posts/{post_id}/")
+    pid = post["id"]
+    url = urljoin(admin_base(cfg), f"posts/{pid}/")
     resp = session(cfg).delete(url, timeout=60)
     if resp.status_code != 204:
         raise GhostPublishError(f"post delete failed: {resp.status_code} {resp.text[:500]}")
-    return post_id
+    return pid
 
 
 def parse_args() -> argparse.Namespace:
@@ -428,10 +448,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--status", choices=["draft", "published", "scheduled", "sent"])
     p.add_argument("--excerpt")
     p.add_argument("--slug")
-    p.add_argument("--tag", action="append", default=[], help="Tag by name (creates if missing). Use 'name:desc:slug' for metadata or pass JSON objects.")
-    p.add_argument("--author", action="append", default=[], help="Author by email address (primary author) or author object with id/name/email.")
-    p.add_argument("--feature-image")
-    p.add_argument("--feature-image-alt", default="", help="DEPRECATED: alt text is set in post content (HTML/lexical), not via the images upload API. This flag is preserved for backward compatibility but has no effect.")
+    p.add_argument("--tag", action="append", default=[], help="Tag by name. Use 'name:desc:slug' for metadata or pass JSON objects.")
+    p.add_argument("--author", action="append", default=[], help="Author by email address or JSON object with id/name/email.")
+    p.add_argument("--feature-image", help="Local path or URL for the post feature image")
     p.add_argument("--image", action="append", default=[], help="Local image path to upload and replace by filename or exact path")
     p.add_argument("--use-source", choices=["html", "lexical"], default="html", help="Write payload source format")
     p.add_argument("--update-id", help="Update an existing post by Ghost id")
@@ -439,7 +458,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--find-title", help="Find an existing post by title and update it")
     p.add_argument("--print-found", action="store_true", help="Print the found post info and exit")
     p.add_argument("--delete", action="store_true", help="Delete a post instead of publishing")
-    p.add_argument("--post-id", help="Delete a post by Ghost id (use with --delete)")
+    p.add_argument("--post-id", help="Post ID for delete (use with --delete)")
     return p.parse_args()
 
 
@@ -458,14 +477,6 @@ def _iter_images(raw: Any) -> List[Dict[str, str]]:
 
 
 def _normalize_tags(tags: List[Any]) -> List[Dict[str, Any]]:
-    """Normalize tags to Ghost API format.
-
-    Ghost API supports:
-    - Short form: string name → {"name": "Tag Name"}
-    - Long form: object with name/description/slug → passed through
-    - Convenience: "name:desc:slug" syntax
-    Tags that cannot be matched are automatically created by Ghost.
-    """
     result: List[Dict[str, Any]] = []
     for tag in tags:
         if isinstance(tag, dict):
@@ -485,12 +496,6 @@ def _normalize_tags(tags: List[Any]) -> List[Dict[str, Any]]:
 
 
 def _normalize_authors(authors: List[Any]) -> List[Dict[str, Any]]:
-    """Normalize authors to Ghost API format.
-
-    Ghost API supports:
-    - Short form: email string → {"email": "author@example.com"}
-    - Long form: object with id/email → passed through
-    """
     result: List[Dict[str, Any]] = []
     for author in authors:
         if isinstance(author, dict):
@@ -504,49 +509,26 @@ def _normalize_authors(authors: List[Any]) -> List[Dict[str, Any]]:
 
 def generate_slug(title: str) -> str:
     """Generate a compliant Ghost slug from title.
-    
-    Rules:
-    - Short (max 40 chars)
-    - Lowercase English or short pinyin
-    - No dates, punctuation (except hyphens)
-    - Human-readable
+
+    Rules: short (max 40 chars), lowercase, hyphens only, no dates.
+    Prioritises English keywords; falls back to individual Chinese characters.
     """
-    import re
-    import unicodedata
-    
-    # Try to extract key English words first
     english_words = re.findall(r'[A-Za-z]{2,}', title)
     if english_words:
-        # Take first 3-4 meaningful words, filter common stop words
         stop_words = {'the', 'is', 'a', 'an', 'to', 'of', 'in', 'for', 'on', 'with', 'and', 'or', 'by'}
         keywords = [w.lower() for w in english_words[:5] if w.lower() not in stop_words]
-        if keywords:
-            slug = '-'.join(keywords[:4])
-        else:
-            slug = '-'.join([w.lower() for w in english_words[:4]])
+        slug = '-'.join(keywords[:4] if keywords else [w.lower() for w in english_words[:4]])
     else:
-        # Fallback for Chinese/mixed: extract meaningful parts
-        # For pure Chinese, use first 2-3 key chars joined
         chinese_chars = re.findall(r'[\u4e00-\u9fff]', title)
         if chinese_chars:
-            # Take 2-4 chars that are likely keywords (avoid 的、了、是 etc.)
             stop_chars = '的了是在有和为不与或及于被把将给从到向以而但如这那'
             key_chars = [c for c in chinese_chars[:8] if c not in stop_chars]
-            if key_chars:
-                slug = '-'.join(key_chars[:4])
-            else:
-                slug = '-'.join(chinese_chars[:4])
+            slug = '-'.join(key_chars[:4] if key_chars else chinese_chars[:4])
         else:
-            # Last resort: use all alphanumerics
             words = re.findall(r'\w+', title.lower())
             slug = '-'.join(words[:4]) if words else 'untitled'
-    
-    # Truncate to 40 chars, remove trailing hyphens
-    slug = slug[:40].rstrip('-')
-    # Ensure at least one character
-    if not slug:
-        slug = 'untitled'
-    
+
+    slug = slug[:40].rstrip('-') or 'untitled'
     return slug
 
 
@@ -554,6 +536,13 @@ def main() -> int:
     try:
         args = parse_args()
         cfg = load_config()
+
+        # Handle delete mode early — does not require title or content
+        if args.delete:
+            deleted_id = delete_post(cfg, post_id=args.post_id or args.update_id, slug=args.slug or args.find_slug)
+            print(json.dumps({"deleted_id": deleted_id}, ensure_ascii=False))
+            return 0
+
         data = load_json_arg(args.json, Path(args.input) if args.input else None)
         title = args.title or data.get("title")
         if not title:
@@ -563,14 +552,8 @@ def main() -> int:
         html = Path(args.html_file).read_text(encoding="utf-8") if args.html_file else data.get("html")
         lexical = data.get("lexical")
 
-        # Handle delete mode
-        if args.delete:
-            deleted_id = delete_post(cfg, post_id=args.post_id or args.update_id, slug=args.slug or args.find_slug)
-            print(json.dumps({"deleted_id": deleted_id}, ensure_ascii=False))
-            return 0
-
         if html is None and markdown is None and lexical is None:
-            raise GhostPublishError("provide markdown, html, or lexical")
+            raise GhostPublishError("provide markdown, html, or lexical content")
 
         existing = None
         if args.update_id or args.find_slug or args.find_title:
@@ -578,16 +561,17 @@ def main() -> int:
             if args.print_found:
                 print(json.dumps(existing, ensure_ascii=False))
                 return 0
+            # Ensure updated_at is present for optimistic locking (Ghost requires it on PUT)
             if existing.get("id") and not existing.get("updated_at"):
                 existing = find_post(cfg, post_id=existing["id"])
 
         image_map: Dict[str, str] = {}
         for img in _iter_images(list(args.image) + list(data.get("images", []))):
             path = Path(img["path"])
-            url = upload_image(cfg, path, alt=img["alt"])
-            image_map[path.name] = url
-            image_map[str(path)] = url
-            image_map[path.as_posix()] = url
+            remote_url = upload_image(cfg, path)
+            image_map[path.name] = remote_url
+            image_map[str(path)] = remote_url
+            image_map[path.as_posix()] = remote_url
 
         source = args.use_source
         post: Dict[str, Any] = {"title": title, "status": args.status or data.get("status", "draft")}
@@ -605,13 +589,13 @@ def main() -> int:
         if args.slug or data.get("slug"):
             post["slug"] = args.slug or data.get("slug")
         elif not existing:
-            # Auto-generate slug when creating new post (not updating)
             generated = generate_slug(title)
             post["slug"] = generated
-            # Warn if it's a generated slug
             eprint(f"[WARN] Auto-generated slug: {generated}")
+
         if args.excerpt or data.get("excerpt"):
             post["excerpt"] = args.excerpt or data.get("excerpt")
+
         tags = list(args.tag) + list(data.get("tags", []))
         if tags:
             post["tags"] = _normalize_tags(tags)
@@ -623,8 +607,12 @@ def main() -> int:
         feature_image = args.feature_image or data.get("feature_image")
         if feature_image:
             feature_path = Path(str(feature_image))
-            post["feature_image"] = upload_image(cfg, feature_path, alt=args.feature_image_alt) if feature_path.exists() else feature_image
+            if feature_path.exists():
+                post["feature_image"] = upload_image(cfg, feature_path)
+            else:
+                post["feature_image"] = str(feature_image)
 
+        # updated_at is required by Ghost for optimistic locking on PUT requests
         if existing and existing.get("updated_at"):
             post["updated_at"] = existing["updated_at"]
 
