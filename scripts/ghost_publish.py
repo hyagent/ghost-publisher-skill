@@ -552,9 +552,6 @@ def main() -> int:
         html = Path(args.html_file).read_text(encoding="utf-8") if args.html_file else data.get("html")
         lexical = data.get("lexical")
 
-        if html is None and markdown is None and lexical is None:
-            raise GhostPublishError("provide markdown, html, or lexical content")
-
         existing = None
         if args.update_id or args.find_slug or args.find_title:
             existing = find_post(cfg, post_id=args.update_id, slug=args.find_slug, title=args.find_title)
@@ -564,6 +561,9 @@ def main() -> int:
             # Ensure updated_at is present for optimistic locking (Ghost requires it on PUT)
             if existing.get("id") and not existing.get("updated_at"):
                 existing = find_post(cfg, post_id=existing["id"])
+
+        if html is None and markdown is None and lexical is None:
+            raise GhostPublishError("provide markdown, html, or lexical content")
 
         image_map: Dict[str, str] = {}
         for img in _iter_images(list(args.image) + list(data.get("images", []))):
