@@ -204,6 +204,7 @@ The deletion endpoint returns `204 No Content` on success. The output includes t
 - `references/ghost-docs.md`: current Ghost API behavior relevant to this skill.
 - `references/ghost-llms-full.txt`: comprehensive Ghost Admin API documentation for LLM/agent indexing and detailed reference. Useful for resolving edge cases, understanding API nuances, or when the skill behavior needs updating.
 - `references/ghost-llms.txt`: Ghost documentation index for discovering available API sections.
+- `references/technical-review-writing-guide.md`: **技术评测文章写作指南** — 用于撰写有理有据、客观公正的产品对比/迁移评估文章。
 
 These llms files follow [Mintlify's LLM standard](https://docs.ghost.org/llm.md) and provide up-to-date API reference material. When in doubt about Ghost API behavior, consult `references/ghost-llms-full.txt`.
 
