@@ -59,6 +59,14 @@ Use the built-in similarity detection to avoid creating duplicate or near-duplic
 
 - Read credentials only inside the helper script.
 - Never print secrets, headers, or raw API key material.
+- **Privacy scrub before publish**: Before writing or publishing any article derived from real operations, replace all personally identifiable or sensitive information with generic placeholders. This includes:
+  - IP addresses (public, private, Tailscale) → `<YOUR_PUBLIC_IP>`, `<INTERNAL_IP>`, `<TAILSCALE_IP>`
+  - Hostnames and device names → `<your-device>`
+  - Tailnet domain names (e.g. `xxx.tailbff26.ts.net`) → `<your-device>.xxx.ts.net`
+  - Usernames and email addresses → `user@` or `user@example.com`
+  - API keys, tokens, UUIDs → `<YOUR_API_KEY>`
+  - Any other site-specific or account-specific identifiers
+  - Apply the same scrub to both the local markdown file and the published Ghost post.
 - Use the Ghost Admin API for writes; the Content API is read-only.
 - Prefer `draft` unless publishing is explicitly intended.
 - Use `source=html` for HTML/markdown workflows; use `source=lexical` only when providing a lexical payload directly.
