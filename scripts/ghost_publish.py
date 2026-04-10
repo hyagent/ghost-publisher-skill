@@ -178,7 +178,22 @@ def normalize_markdown(md: str, title: Optional[str] = None) -> str:
     return "\n".join(normalized)
 
 
+def normalize_symbols(text: str) -> str:
+    """Convert common LaTeX-style symbols to Unicode equivalents."""
+    replacements = {
+        r"$\rightarrow$": "→",
+        r"$\leftarrow$": "←",
+        r"$\Rightarrow$": "⇒",
+        r"$\Leftarrow$": "⇐",
+        r"$\leftrightarrow$": "↔",
+    }
+    for latex, unicode_sym in replacements.items():
+        text = text.replace(latex, unicode_sym)
+    return text
+
+
 def markdown_to_html(md: str, title: Optional[str] = None) -> str:
+    md = normalize_symbols(md)
     lines = normalize_markdown(md, title=title).split("\n")
     out: List[str] = []
     in_ul = False
