@@ -23,7 +23,7 @@ Use this skill to prepare and publish Ghost posts deterministically from the com
 
 ### Content Deduplication Workflow
 
-The helper script should be treated as deterministic and version-specific. If the local script does **not** expose similarity flags such as `--check-similar` or `--auto-suggest`, use one of these deterministic approaches instead:
+The helper script should be treated as deterministic and version-specific. Confirm supported flags with `python3 scripts/ghost_publish.py --help` before relying on examples. If the local script does **not** expose similarity flags such as `--check-similar` or `--auto-suggest`, use one of these deterministic approaches instead:
 
 1. **Find an existing post first**
    ```bash
@@ -66,6 +66,7 @@ The helper script should be treated as deterministic and version-specific. If th
 - Prefer `draft` unless publishing is explicitly intended.
 - Use `source=html` for HTML/markdown workflows; use `source=lexical` only when providing a lexical payload directly.
 - Treat `title` and body as separate fields: do not repeat the article title as an H1/H2 in the body when Ghost already receives `title`.
+- When modifying skill files or article drafts in a git-tracked workspace, check `git status` before editing, keep changes atomic, and create a commit after verification so every revision is recoverable.
 - **Slug rules**:
   - Always provide explicit `--slug` for important posts
   - If not provided, script auto-generates a compliant slug (short, lowercase English/short pinyin, max 40 chars)
