@@ -12,12 +12,22 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urljoin
 
 import requests
 
 DEFAULT_API_VERSION = os.environ.get("GHOST_API_VERSION", "v6.0")
+
+# Default tag aliases to prevent synonymous tag proliferation.
+# Keys are forbidden/tag variants; values are the canonical tag names.
+DEFAULT_TAG_ALIASES: Dict[str, str] = {
+    "Hermes Agent": "Hermes",
+    "hermes agent": "Hermes",
+    "AI Agent": "Agent",
+    "ai agent": "Agent",
+    "记忆": "Memory",
+}
 
 
 class GhostPublishError(RuntimeError):
@@ -453,6 +463,217 @@ def delete_post(cfg: GhostConfig, *, post_id: Optional[str] = None, slug: Option
     return pid
 
 
+# ---------------------------------------------------------------------------
+# Tag management helpers
+# ---------------------------------------------------------------------------
+
+def load_tag_aliases(path: Optional[Path] = None) -> Dict[str, str]:
+    aliases = dict(DEFAULT_TAG_ALIASES)
+    if path and path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                aliases.update(data)
+        except Exception as exc:
+            eprint(f"[WARN] Failed to load tag alias file: {exc}")
+    return aliases
+
+
+def _normalize_tags(tags: List[Any], aliases: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
+    aliases = aliases or {}
+    result: List[Dict[str, Any]] = []
+    seen: set = set()
+    for tag in tags:
+        if isinstance(tag, dict):
+            tag_obj = dict(tag)
+            name = tag_obj.get("name", "").strip()
+        else:
+            tag_str = str(tag).strip()
+            if not tag_str:
+                continue
+            # Apply alias before parsing colon-separated metadata
+            canonical = aliases.get(tag_str, tag_str)
+            parts = canonical.split(":", 2)
+            tag_obj: Dict[str, Any] = {"name": parts[0].strip()}
+            if len(parts) > 1 and parts[1].strip():
+                tag_obj["description"] = parts[1].strip()
+            if len(parts) > 2 and parts[2].strip():
+                tag_obj["slug"] = parts[2].strip()
+            name = tag_obj["name"]
+        if not name:
+            continue
+        # Deduplicate case-insensitively
+        lower = name.lower()
+        if lower in seen:
+            continue
+        seen.add(lower)
+        result.append(tag_obj)
+    return result
+
+
+def _fetch_all_tags(cfg: GhostConfig) -> List[Dict[str, Any]]:
+    url = urljoin(admin_base(cfg), "tags/?limit=all&include=count.posts")
+    resp = session(cfg).get(url, timeout=60)
+    if resp.status_code >= 300:
+        raise GhostPublishError(f"tags fetch failed: {resp.status_code} {resp.text[:500]}")
+    return resp.json().get("tags", [])
+
+
+def _find_tag(cfg: GhostConfig, *, tag_id: Optional[str] = None, slug: Optional[str] = None, name: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    tags = _fetch_all_tags(cfg)
+    for t in tags:
+        if tag_id and t["id"] == tag_id:
+            return t
+        if slug and t["slug"] == slug:
+            return t
+        if name and t.get("name", "").strip().lower() == name.strip().lower():
+            return t
+    return None
+
+
+def list_tags(cfg: GhostConfig) -> None:
+    tags = _fetch_all_tags(cfg)
+    print(json.dumps({
+        "total": len(tags),
+        "tags": [
+            {
+                "id": t["id"],
+                "name": t["name"],
+                "slug": t["slug"],
+                "description": t.get("description"),
+                "count": t.get("count", {}).get("posts", 0),
+            }
+            for t in tags
+        ]
+    }, ensure_ascii=False, indent=2))
+
+
+def merge_tags(cfg: GhostConfig, from_slug: str, to_slug: str, dry_run: bool = False) -> None:
+    """Move all posts from one tag to another, then delete the source tag."""
+    from_tag = _find_tag(cfg, slug=from_slug)
+    to_tag = _find_tag(cfg, slug=to_slug)
+    if not from_tag:
+        raise GhostPublishError(f"source tag not found: {from_slug}")
+    if not to_tag:
+        raise GhostPublishError(f"target tag not found: {to_slug}")
+
+    # Fetch posts that use the source tag
+    url = urljoin(admin_base(cfg), f"posts/?filter=tag:{from_slug}&limit=all&include=tags")
+    resp = session(cfg).get(url, timeout=60)
+    if resp.status_code >= 300:
+        raise GhostPublishError(f"posts fetch failed: {resp.status_code} {resp.text[:500]}")
+    posts = resp.json().get("posts", [])
+
+    action = "would update" if dry_run else "updating"
+    eprint(f"[{action}] {len(posts)} post(s) from '{from_tag['name']}' -> '{to_tag['name']}'")
+
+    if dry_run:
+        for p in posts:
+            print(json.dumps({"id": p["id"], "title": p["title"], "action": "dry_run"}, ensure_ascii=False))
+        return
+
+    s = session(cfg)
+    for p in posts:
+        # Build new tag list: replace source tag with target tag object
+        new_tags: List[Dict[str, Any]] = []
+        seen = set()
+        for t in p.get("tags", []):
+            if t["slug"] == from_slug:
+                continue
+            key = t["name"].lower()
+            if key not in seen:
+                seen.add(key)
+                new_tags.append({"name": t["name"]})
+        # Add target if not already present
+        if to_tag["name"].lower() not in seen:
+            new_tags.append({"name": to_tag["name"]})
+
+        post_url = urljoin(admin_base(cfg), f"posts/{p['id']}/?source=html")
+        # Need updated_at for optimistic locking
+        get_resp = s.get(post_url, timeout=60)
+        if get_resp.status_code >= 300:
+            eprint(f"[WARN] Failed to fetch post {p['id']}: {get_resp.status_code}")
+            continue
+        updated_at = get_resp.json()["posts"][0]["updated_at"]
+
+        put_resp = s.put(post_url, json={"posts": [{"tags": new_tags, "updated_at": updated_at}]}, timeout=60)
+        if put_resp.status_code >= 300:
+            eprint(f"[WARN] Failed to update post {p['id']}: {put_resp.status_code} {put_resp.text[:300]}")
+        else:
+            print(json.dumps({"id": p["id"], "title": p["title"], "action": "tag_merged"}, ensure_ascii=False))
+
+    # Delete source tag
+    del_url = urljoin(admin_base(cfg), f"tags/{from_tag['id']}/")
+    del_resp = s.delete(del_url, timeout=60)
+    if del_resp.status_code == 204:
+        print(json.dumps({"deleted_tag": from_tag["name"], "slug": from_slug}, ensure_ascii=False))
+    else:
+        eprint(f"[WARN] Failed to delete tag {from_slug}: {del_resp.status_code} {del_resp.text[:300]}")
+
+
+def delete_empty_tags(cfg: GhostConfig, dry_run: bool = False) -> None:
+    tags = _fetch_all_tags(cfg)
+    removed = []
+    for t in tags:
+        count = t.get("count", {}).get("posts", 0)
+        if count == 0:
+            if dry_run:
+                removed.append({"id": t["id"], "name": t["name"], "slug": t["slug"], "action": "dry_run"})
+            else:
+                url = urljoin(admin_base(cfg), f"tags/{t['id']}/")
+                resp = session(cfg).delete(url, timeout=60)
+                if resp.status_code == 204:
+                    removed.append({"id": t["id"], "name": t["name"], "slug": t["slug"], "action": "deleted"})
+                else:
+                    eprint(f"[WARN] Failed to delete tag {t['name']}: {resp.status_code}")
+    print(json.dumps({"removed": removed, "count": len(removed)}, ensure_ascii=False, indent=2))
+
+
+def check_tag_conflicts(cfg: GhostConfig, tag_names: List[str]) -> List[Dict[str, Any]]:
+    """Check for similar existing tags before creating new ones."""
+    if not tag_names:
+        return []
+    existing = _fetch_all_tags(cfg)
+    warnings: List[Dict[str, Any]] = []
+    for name in tag_names:
+        lower = name.lower()
+        for t in existing:
+            existing_name = t["name"]
+            el = existing_name.lower()
+            if el == lower:
+                continue  # exact match is fine
+            # containment or very close
+            if lower in el or el in lower or _levenshtein(lower, el) <= 2:
+                warnings.append({
+                    "input": name,
+                    "existing": existing_name,
+                    "slug": t["slug"],
+                    "reason": "similar_tag",
+                })
+    return warnings
+
+
+def _levenshtein(a: str, b: str) -> int:
+    if len(a) < len(b):
+        return _levenshtein(b, a)
+    if len(b) == 0:
+        return len(a)
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a):
+        curr = [i + 1]
+        for j, cb in enumerate(b):
+            ins = prev[j + 1] + 1
+            dele = curr[j] + 1
+            sub = prev[j] + (0 if ca == cb else 1)
+            curr.append(min(ins, dele, sub))
+        prev = curr
+    return prev[-1]
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Publish or update a Ghost post using the Admin API")
     p.add_argument("--input", help="JSON file with post fields")
@@ -474,6 +695,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--print-found", action="store_true", help="Print the found post info and exit")
     p.add_argument("--delete", action="store_true", help="Delete a post instead of publishing")
     p.add_argument("--post-id", help="Post ID for delete (use with --delete)")
+    # Tag management flags
+    p.add_argument("--list-tags", action="store_true", help="List all tags with post counts")
+    p.add_argument("--merge-tags", help="Merge two tags: from_slug:to_slug")
+    p.add_argument("--delete-empty-tags", action="store_true", help="Delete tags with zero posts")
+    p.add_argument("--dry-run", action="store_true", help="Show what would change without applying")
+    p.add_argument("--tag-alias-file", help="JSON file with tag alias mappings")
+    p.add_argument("--skip-tag-check", action="store_true", help="Skip similar-tag conflict check on publish")
     return p.parse_args()
 
 
@@ -489,25 +717,6 @@ def _iter_images(raw: Any) -> List[Dict[str, str]]:
         if src:
             items.append({"path": str(src), "alt": str(alt)})
     return items
-
-
-def _normalize_tags(tags: List[Any]) -> List[Dict[str, Any]]:
-    result: List[Dict[str, Any]] = []
-    for tag in tags:
-        if isinstance(tag, dict):
-            result.append(tag)
-        else:
-            tag_str = str(tag).strip()
-            if not tag_str:
-                continue
-            parts = tag_str.split(":", 2)
-            tag_obj: Dict[str, Any] = {"name": parts[0].strip()}
-            if len(parts) > 1 and parts[1].strip():
-                tag_obj["description"] = parts[1].strip()
-            if len(parts) > 2 and parts[2].strip():
-                tag_obj["slug"] = parts[2].strip()
-            result.append(tag_obj)
-    return result
 
 
 def _normalize_authors(authors: List[Any]) -> List[Dict[str, Any]]:
@@ -551,6 +760,23 @@ def main() -> int:
     try:
         args = parse_args()
         cfg = load_config()
+        aliases = load_tag_aliases(Path(args.tag_alias_file) if args.tag_alias_file else None)
+
+        # Tag management modes
+        if args.list_tags:
+            list_tags(cfg)
+            return 0
+
+        if args.merge_tags:
+            if ":" not in args.merge_tags:
+                raise GhostPublishError("--merge-tags requires from_slug:to_slug")
+            from_slug, to_slug = args.merge_tags.split(":", 1)
+            merge_tags(cfg, from_slug.strip(), to_slug.strip(), dry_run=args.dry_run)
+            return 0
+
+        if args.delete_empty_tags:
+            delete_empty_tags(cfg, dry_run=args.dry_run)
+            return 0
 
         # Handle delete mode early — does not require title or content
         if args.delete:
@@ -613,7 +839,17 @@ def main() -> int:
 
         tags = list(args.tag) + list(data.get("tags", []))
         if tags:
-            post["tags"] = _normalize_tags(tags)
+            post["tags"] = _normalize_tags(tags, aliases=aliases)
+
+        # Tag conflict check before publish
+        if not args.skip_tag_check and post.get("tags"):
+            tag_names = [t["name"] for t in post["tags"] if isinstance(t, dict)]
+            conflicts = check_tag_conflicts(cfg, tag_names)
+            if conflicts:
+                eprint("[WARN] Similar existing tags detected:")
+                for c in conflicts:
+                    eprint(f"  Input '{c['input']}' is similar to existing '{c['existing']}' (slug: {c['slug']})")
+                eprint("Use --skip-tag-check to bypass this warning.")
 
         authors = list(args.author) + list(data.get("authors", []))
         if authors:
