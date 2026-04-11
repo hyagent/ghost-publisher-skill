@@ -62,9 +62,15 @@ def load_config() -> GhostConfig:
     api_key = _first_env("GHOST_ADMIN_API_KEY", "GHOST_API_KEY")
     api_version = _first_env("GHOST_API_VERSION") or DEFAULT_API_VERSION
     if not host:
-        raise GhostPublishError("GHOST_HOST is required")
+        raise GhostPublishError(
+            "Ghost host is not configured. Set one of the following environment variables: "
+            "GHOST_ADMIN_HOST, GHOST_HOST, GHOST_ADMIN_URL, or GHOST_URL."
+        )
     if not api_key:
-        raise GhostPublishError("GHOST_ADMIN_API_KEY (or GHOST_API_KEY) is required")
+        raise GhostPublishError(
+            "Ghost Admin API key is not configured. Set GHOST_ADMIN_API_KEY (preferred) "
+            "or GHOST_API_KEY as an environment variable."
+        )
     if ":" not in api_key:
         raise GhostPublishError("API key must be in the form <id>:<hex_secret>")
     key_id, secret = api_key.split(":", 1)

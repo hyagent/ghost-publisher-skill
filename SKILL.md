@@ -7,9 +7,10 @@ description: Publish or update Ghost posts with rich article content and local i
 
 ## Security Rules (Critical)
 
+- **Treat `GHOST_ADMIN_API_KEY` and `GHOST_HOST` as black boxes**: The AI agent must NEVER read the actual values of these two environment variables into the conversation context. Do not use `echo`, `env`, `cat`, `grep`, or any other command to inspect or reveal their values. Invoke the helper script directly and let it read the variables internally.
 - **NEVER expose credential values**: Do not print, log, or return the values of `GHOST_ADMIN_API_KEY`, `GHOST_API_KEY`, `GHOST_HOST`, `GHOST_ADMIN_HOST`, `GHOST_URL`, or `GHOST_ADMIN_URL`. These values must remain inside the helper script only.
-- **AI Agent must NOT read env vars**: The agent is strictly forbidden from reading the actual values of `GHOST_ADMIN_API_KEY` or `GHOST_HOST` into the conversation context. Use the script as a black box—invoke it, but do not inspect or echo the environment variables.
 - **Never print secrets, headers, or raw API key material**.
+- **If credentials are missing**: When the script fails with a credential error, tell the user which environment variables are needed and ask them to set them. Do not attempt to read or guess the values.
 - **Privacy scrub before publish**: Before writing or publishing any article derived from real operations, replace all personally identifiable or sensitive information with generic placeholders. This includes:
   - IP addresses (public, private, Tailscale) → `<YOUR_PUBLIC_IP>`, `<INTERNAL_IP>`, `<TAILSCALE_IP>`
   - Hostnames and device names → `<your-device>`
@@ -68,14 +69,16 @@ python3 scripts/ghost_publish.py --delete-empty-tags
 python3 scripts/ghost_publish.py --delete-empty-tags --dry-run
 ```
 
-### Avoiding tag chaos
+### Tag discipline for agents
 
-- Prefer reusing existing tags; the script warns when a new tag looks similar to an existing one.
-- Use `--skip-tag-check` to bypass the similarity warning if you are sure.
-- Provide a custom alias file with `--tag-alias-file aliases.json`:
-  ```json
-  {"My Alias": "Canonical Tag"}
-  ```
+When creating or updating a post, you must prevent tag proliferation through active pre-flight checks:
+
+1. **Always inspect existing tags first** by running `--list-tags` before assigning tags to a new post.
+2. **Reuse existing tags** whenever possible. Do not invent a new tag if an existing one covers the same concept.
+3. **Do not create near-duplicate tags**. If `--list-tags` shows a tag that is identical, contains, or highly similar (edit distance ≤ 2) to your intended tag, you must use the existing tag instead.
+4. **Use built-in aliases**. The script automatically collapses `Hermes Agent` → `Hermes`, `AI Agent` → `Agent`, `记忆` → `Memory`. Rely on this mechanism rather than manual cleanup.
+5. **Merge existing duplicates immediately**. If you discover two live tags that mean the same thing during your work, merge them on the spot with `--merge-tags` instead of leaving them for later.
+6. **Skip the check only when certain**. Use `--skip-tag-check` only if the user explicitly overrides the warning.
 
 ## Post Operations
 
