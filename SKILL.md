@@ -20,6 +20,14 @@ description: Publish or update Ghost posts with rich article content and local i
   - Any other site-specific or account-specific identifiers
   - Apply the same scrub to both the local markdown file and the published Ghost post.
 
+## Security Best Practices
+
+1. **Before using `ghost-publisher` (or any credential-bearing skill), review its security rules first.** This prevents accidental attempts to read or print environment variables into the conversation context.
+
+2. **Use the helper script's built-in flags for all lookups.** When you need to check API connectivity, find duplicate posts, or verify existing slugs, always use the wrapper script's native options (`--find-slug`, `--find-title`, `--print-found`, `--list-tags`, etc.) instead of writing custom Python or shell snippets that read `GHOST_API_KEY` or `GHOST_HOST` directly.
+
+3. **Redact PII in tool outputs before presenting them.** The Ghost Admin API JSON responses may contain author emails and other PII. When summarizing or quoting tool results, scan for fields like `email`, `password`, `token`, `key`, `secret`, `credential`, and replace them with placeholders (e.g., `yu***@gmail.com` or `<AUTHOR_EMAIL>`). Do not let raw PII sit in the conversation history.
+
 ## Publishing Workflow
 
 1. **Draft first**: Always start with `--status draft` to create/update a draft.
