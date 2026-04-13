@@ -28,6 +28,25 @@ description: Publish or update Ghost posts with rich article content and local i
 
 3. **Redact PII in tool outputs before presenting them.** The Ghost Admin API JSON responses may contain author emails and other PII. When summarizing or quoting tool results, scan for fields like `email`, `password`, `token`, `key`, `secret`, `credential`, and replace them with placeholders (e.g., `yu***@gmail.com` or `<AUTHOR_EMAIL>`). Do not let raw PII sit in the conversation history.
 
+## Skill Maintenance & Generalization Rule (Critical for Future Edits)
+
+`ghost-publisher` is a **general-purpose skill**, not a project-specific tool. When you are instructed to modify or improve this skill, you **must not** embed any site-specific, project-specific, or proprietary information into the skill source code or documentation.
+
+**Strictly forbidden** in skill files (`SKILL.md`, `scripts/ghost_publish.py`, `references/*.md`, etc.):
+- Specific website names, domain names, or publication titles (e.g., `IT小灶`, `hitorch.cn`, `example-blog.com`)
+- Site-specific tag names, category names, author names, or content themes used as hardcoded examples
+- Real article titles, slugs, or feature images from any specific project
+- Project-specific anecdotes like "derived from SEO optimization on X site"
+- Site-specific color schemes, brand assets, or navigation structures
+
+**Correct approach**:
+- Use **generic placeholders** in all examples: `站点名称`, `example.com`, `标签一`, `标签二`, `Author Name`, `Category A`, `Category B`
+- Use **abstract, generalized examples** when illustrating rules: e.g., "An article about a business process should not be tagged with unrelated broad tech terms"
+- Keep all project-specific customizations (actual tag lists, site names, author bios, SEO targets) in **user-level configuration files, environment variables, or workspace notes**, never inside the skill repository itself
+- If the user asks you to encode a lesson learned from a specific project into the skill, translate it into a **universal principle** before writing it into the skill files
+
+If you are unsure whether an example or piece of text is too specific, **err on the side of abstraction**.
+
 ## Publishing Workflow
 
 1. **Draft first**: Always start with `--status draft` to create/update a draft.
@@ -48,10 +67,10 @@ Required frontmatter for SEO and structural correctness:
 ---
 title: "文章主标题"
 slug: "wen-zhang-slug"
-meta_title: "SEO 标题 | IT小灶"
+meta_title: "SEO 标题 | 站点名称"
 meta_description: "SEO 描述，≤ 160 字符，包含关键词与行动召唤"
 feature_image: "feature-image.jpg"
-tags: ["AI", "技术架构"]
+tags: ["标签一", "标签二"]
 ---
 ```
 
@@ -60,7 +79,7 @@ Guidelines:
 - `slug`: short, lowercase English or short pinyin, no dates or punctuation.
 - `meta_description`: keep it ≤ 160 chars; include a primary keyword and a soft call to action. This is used for SEO and will NOT be rendered on the article page.
 - `excerpt` (optional): maps to Ghost's `custom_excerpt`. **Caution**: Ghost default themes render `custom_excerpt` prominently under the article title on the single-post page. Only use it if you intentionally want a sub-headline/summary to appear there; for pure SEO descriptions, rely on `meta_description` instead.
-- `tags`: check existing tags with `--list-tags` first; reuse canonical tags and avoid near-duplicates.
+- `tags`: **max 2 tags**, must reflect the article's **core topic** (not every keyword that appears). Run `--list-tags` first and reuse canonical tags. Avoid broad keyword-stuffing tags (e.g., do not tag every article with a general term like `AI` unless AI is the primary subject). When in doubt, choose the narrower/specific tag over the broad one.
 
 ## Tag Management
 
@@ -105,11 +124,16 @@ python3 scripts/ghost_publish.py --delete-empty-tags --dry-run
 When creating or updating a post, you must prevent tag proliferation through active pre-flight checks:
 
 1. **Always inspect existing tags first** by running `--list-tags` before assigning tags to a new post.
-2. **Reuse existing tags** whenever possible. Do not invent a new tag if an existing one covers the same concept.
-3. **Do not create near-duplicate tags**. If `--list-tags` shows a tag that is identical, contains, or highly similar (edit distance ≤ 2) to your intended tag, you must use the existing tag instead.
-4. **Use built-in aliases**. The script automatically collapses `Hermes Agent` → `Hermes`, `AI Agent` → `Agent`, `记忆` → `Memory`. Rely on this mechanism rather than manual cleanup.
-5. **Merge existing duplicates immediately**. If you discover two live tags that mean the same thing during your work, merge them on the spot with `--merge-tags` instead of leaving them for later.
-6. **Skip the check only when certain**. Use `--skip-tag-check` only if the user explicitly overrides the warning.
+2. **Maximum 2 tags per post**. Ghost does not enforce a limit, but exceeding 2 tags dilutes topical authority and creates low-value tag pages. If you find yourself wanting 3+ tags, re-evaluate which 2 are most central.
+3. **Tag must match core topic, not keyword-stuffing**. Do not add a tag just because the word appears in the article. A tag should represent the **primary subject** the reader would expect to find on that tag page.
+   - Example: An article about "setting up a US LLC to get a debit card" should not be tagged with broad tech terms just because it mentions paying for SaaS tools. Its correct tags are the business/finance categories it actually covers.
+   - Example: A guide about integrating a specific framework should be tagged with that framework and its domain (e.g., `FrameworkName, DevOps`), not with unrelated broad topics like `AI` unless AI architecture is the main subject.
+4. **Align with the site's content boundaries**. Tags should map to the site's established content pillars. Do not introduce one-off tags that do not fit the overall taxonomy.
+5. **Reuse existing tags** whenever possible. Do not invent a new tag if an existing one covers the same concept.
+6. **Do not create near-duplicate tags**. If `--list-tags` shows a tag that is identical, contains, or highly similar (edit distance ≤ 2) to your intended tag, you must use the existing tag instead.
+7. **Use built-in aliases**. The script automatically collapses `Hermes Agent` → `Hermes`, `AI Agent` → `Agent`, `记忆` → `Memory`. Rely on this mechanism rather than manual cleanup.
+8. **Merge existing duplicates immediately**. If you discover two live tags that mean the same thing during your work, merge them on the spot with `--merge-tags` instead of leaving them for later.
+9. **Skip the check only when certain**. Use `--skip-tag-check` only if the user explicitly overrides the warning.
 
 ## Post Operations
 
@@ -185,10 +209,10 @@ python3 scripts/ghost_publish.py --delete --slug "ghost-test-publish"
   ---
   title: "文章主标题"
   slug: "wen-zhang-slug"
-  meta_title: "SEO 标题 | IT小灶"
+  meta_title: "SEO 标题 | 站点名称"
   meta_description: "SEO 描述，≤ 160 字符"
   feature_image: "feature-image.jpg"
-  tags: ["AI", "技术架构"]
+  tags: ["标签一", "标签二"]
   ---
   ```
 - When modifying skill files or article drafts in a git-tracked workspace, check `git status` before editing, keep changes atomic, and create a commit after verification so every revision is recoverable.

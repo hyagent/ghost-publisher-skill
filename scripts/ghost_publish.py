@@ -990,6 +990,11 @@ def main() -> int:
         if tags:
             post["tags"] = _normalize_tags(tags, aliases=aliases)
 
+        # Tag count check (soft warning)
+        if post.get("tags") and len(post["tags"]) > 2:
+            eprint(f"[WARN] Post has {len(post['tags'])} tags. SEO best practice is ≤ 2 tags to preserve topical authority.")
+            eprint(f"  Current tags: {[t.get('name') for t in post['tags']]}")
+
         # Tag conflict check before publish
         if not args.skip_tag_check and post.get("tags"):
             tag_names = [t["name"] for t in post["tags"] if isinstance(t, dict)]
