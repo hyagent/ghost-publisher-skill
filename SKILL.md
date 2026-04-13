@@ -39,6 +39,31 @@ description: Publish or update Ghost posts with rich article content and local i
 4. **Verify slug**: Ensure slug follows the rule: short, lowercase English or short pinyin, no dates/punctuation. If not provided, script will auto-generate a compliant slug.
 5. **Publish**: Once the draft is ready, update with `--status published` using the same `--find-slug` to avoid creating a new post.
 
+### Frontmatter-first writing (required)
+
+When generating or editing a markdown file for Ghost publication, **always include a YAML frontmatter block at the very top**. The publish script automatically extracts these fields, so metadata is written at creation time—not patched later.
+
+Required frontmatter for SEO and structural correctness:
+```yaml
+---
+title: "文章主标题"
+slug: "wen-zhang-slug"
+excerpt: "一句话概括核心价值，50–100 字"
+meta_title: "SEO 标题 | IT小灶"
+meta_description: "SEO 描述，≤ 160 字符，包含关键词与行动召唤"
+feature_image: "feature-image.jpg"
+tags: ["AI", "技术架构"]
+---
+```
+
+Guidelines:
+- `title`: do not repeat it as an H1/H2 in the body; Ghost already renders it as the page H1.
+- `slug`: short, lowercase English or short pinyin, no dates or punctuation.
+- `excerpt`: a concise value proposition (1–2 sentences). The script maps this to Ghost's `custom_excerpt` so it is preserved instead of auto-generated.
+- `meta_title`: keep it ≤ 60 chars; append `| IT小灶` for brand consistency.
+- `meta_description`: keep it ≤ 160 chars; include a primary keyword and a soft call to action.
+- `tags`: check existing tags with `--list-tags` first; reuse canonical tags and avoid near-duplicates.
+
 ## Tag Management
 
 The script includes built-in tag normalization and maintenance tools to prevent tag proliferation.
@@ -104,6 +129,35 @@ python3 scripts/ghost_publish.py \
   --status draft
 ```
 
+### Update only post metadata (no content changes)
+```bash
+python3 scripts/ghost_publish.py \
+  --find-slug "existing-slug" \
+  --excerpt "New excerpt" \
+  --meta-title "New SEO title" \
+  --meta-description "New SEO description"
+```
+
+### Bulk-update metadata for many posts
+```bash
+python3 scripts/ghost_publish.py --bulk-meta-file meta_updates.json
+```
+
+`meta_updates.json` format:
+```json
+{
+  "post-slug-1": {
+    "meta_title": "SEO title 1",
+    "meta_description": "SEO description 1",
+    "excerpt": "Excerpt 1"
+  },
+  "post-slug-2": {
+    "meta_title": "SEO title 2",
+    "meta_description": "SEO description 2"
+  }
+}
+```
+
 ### Create a new post when no match exists
 ```bash
 python3 scripts/ghost_publish.py \
@@ -128,6 +182,18 @@ python3 scripts/ghost_publish.py --delete --slug "ghost-test-publish"
 - Prefer `draft` unless publishing is explicitly intended.
 - Use `source=html` for HTML/markdown workflows; use `source=lexical` only when providing a lexical payload directly.
 - Treat `title` and body as separate fields: do not repeat the article title as an H1/H2 in the body when Ghost already receives `title`.
+- **Frontmatter support**: When writing a markdown file, include a YAML frontmatter block at the top. The script automatically extracts `title`, `slug`, `excerpt`, `meta_title`, `meta_description`, `feature_image`, `status`, `tags`, and `authors`. Example:
+  ```yaml
+  ---
+  title: "文章主标题"
+  slug: "wen-zhang-slug"
+  excerpt: "一句话概括核心价值"
+  meta_title: "SEO 标题 | IT小灶"
+  meta_description: "SEO 描述，≤ 160 字符"
+  feature_image: "feature-image.jpg"
+  tags: ["AI", "技术架构"]
+  ---
+  ```
 - When modifying skill files or article drafts in a git-tracked workspace, check `git status` before editing, keep changes atomic, and create a commit after verification so every revision is recoverable.
 - **Slug rules**:
   - Always provide explicit `--slug` for important posts
@@ -252,6 +318,7 @@ When ready to publish:
    - `---` or `***` → `<hr />`
 5. **2026-04-10 fix**: Added symbol normalization to convert common LaTeX-style arrows (e.g., `$\rightarrow$`) to Unicode equivalents (`→`) to prevent raw LaTeX rendering in Ghost.
 6. **2026-04-11 fix**: Added tag management commands (`--list-tags`, `--merge-tags`, `--delete-empty-tags`), built-in tag aliases, and tag conflict detection to prevent tag proliferation.
+7. **2026-04-13 fix**: Added bulk metadata update (`--bulk-meta-file`) and allowed metadata-only updates for existing posts without requiring content re-upload.
 
 If you encounter formatting issues in published Ghost articles:
 1. Check if the markdown uses tables, blockquotes, or inline formatting within tables

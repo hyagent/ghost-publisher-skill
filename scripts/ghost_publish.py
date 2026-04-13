@@ -46,6 +46,41 @@ def eprint(*args: object) -> None:
     print(*args, file=sys.stderr)
 
 
+def parse_frontmatter(text: str) -> Tuple[Dict[str, Any], str]:
+    """Extract YAML-like frontmatter from markdown.
+
+    Returns (frontmatter_dict, body_without_frontmatter).
+    Supports PyYAML if installed; otherwise falls back to simple key: value parsing.
+    """
+    pattern = r'^---\s*\n(.*?)\n---\s*\n'
+    match = re.match(pattern, text, re.DOTALL)
+    if not match:
+        return {}, text
+
+    fm_text = match.group(1)
+    body = text[match.end():]
+
+    try:
+        import yaml
+        parsed = yaml.safe_load(fm_text)
+        if isinstance(parsed, dict):
+            return parsed, body
+    except Exception:
+        pass
+
+    result: Dict[str, Any] = {}
+    for line in fm_text.splitlines():
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        if ':' in line:
+            key, val = line.split(':', 1)
+            key = key.strip()
+            val = val.strip().strip('"').strip("'")
+            result[key] = val
+    return result, body
+
+
 def _first_env(*names: str) -> str:
     for name in names:
         value = os.environ.get(name, "").strip()
@@ -689,6 +724,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--html-file")
     p.add_argument("--status", choices=["draft", "published", "scheduled", "sent"])
     p.add_argument("--excerpt")
+    p.add_argument("--meta-title", help="SEO meta title for the post")
+    p.add_argument("--meta-description", help="SEO meta description for the post")
     p.add_argument("--slug")
     p.add_argument("--tag", action="append", default=[], help="Tag by name. Use 'name:desc:slug' for metadata or pass JSON objects.")
     p.add_argument("--author", action="append", default=[], help="Author by email address or JSON object with id/name/email.")
@@ -708,6 +745,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dry-run", action="store_true", help="Show what would change without applying")
     p.add_argument("--tag-alias-file", help="JSON file with tag alias mappings")
     p.add_argument("--skip-tag-check", action="store_true", help="Skip similar-tag conflict check on publish")
+    p.add_argument("--bulk-meta-file", help="JSON file mapping slug -> {meta_title, meta_description, excerpt} for batch updates")
     return p.parse_args()
 
 
@@ -762,6 +800,66 @@ def generate_slug(title: str) -> str:
     return slug
 
 
+def _has_meta_args(args) -> bool:
+    return bool(args.excerpt or args.meta_title or args.meta_description)
+
+
+def bulk_update_meta(cfg: GhostConfig, path: Path) -> None:
+    """Batch-update meta_title / meta_description / excerpt for multiple posts.
+
+    JSON format: {"post-slug": {"meta_title": "...", "meta_description": "...", "excerpt": "..."}, ...}
+    """
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise GhostPublishError("bulk-meta-file must be a JSON object mapping slug -> fields")
+
+    s = session(cfg)
+    success = []
+    failed = []
+
+    for slug, fields in data.items():
+        try:
+            post = find_post(cfg, slug=slug)
+            if not post:
+                failed.append({"slug": slug, "reason": "post not found"})
+                eprint(f"[SKIP] {slug}: post not found")
+                continue
+
+            payload: Dict[str, Any] = {"updated_at": post["updated_at"]}
+            if "meta_title" in fields:
+                payload["meta_title"] = fields["meta_title"]
+            if "meta_description" in fields:
+                payload["meta_description"] = fields["meta_description"]
+            if "excerpt" in fields:
+                payload["custom_excerpt"] = fields["excerpt"]
+            if "custom_excerpt" in fields:
+                payload["custom_excerpt"] = fields["custom_excerpt"]
+
+            if not payload:
+                eprint(f"[SKIP] {slug}: no meta fields to update")
+                continue
+
+            url = urljoin(admin_base(cfg), f"posts/{post['id']}/?source=html")
+            resp = s.put(url, json={"posts": [payload]}, timeout=60)
+            if resp.status_code >= 300:
+                raise GhostPublishError(f"update failed: {resp.status_code} {resp.text[:500]}")
+
+            updated = resp.json()["posts"][0]
+            success.append({"slug": slug, "title": updated.get("title"), "url": updated.get("url")})
+            print(json.dumps({"slug": slug, "status": "ok"}, ensure_ascii=False))
+        except Exception as exc:
+            failed.append({"slug": slug, "reason": str(exc)})
+            eprint(f"[ERR] {slug}: {exc}")
+
+    eprint(f"\n--- Bulk meta update summary ---")
+    eprint(f"Success: {len(success)}")
+    eprint(f"Failed: {len(failed)}")
+    if failed:
+        for item in failed:
+            eprint(f"  - {item['slug']}: {item['reason']}")
+        raise GhostPublishError("one or more bulk meta updates failed")
+
+
 def main() -> int:
     try:
         args = parse_args()
@@ -784,18 +882,46 @@ def main() -> int:
             delete_empty_tags(cfg, dry_run=args.dry_run)
             return 0
 
+        # Bulk meta update mode
+        if args.bulk_meta_file:
+            bulk_update_meta(cfg, Path(args.bulk_meta_file))
+            return 0
+
         # Handle delete mode early — does not require title or content
         if args.delete:
             deleted_id = delete_post(cfg, post_id=args.post_id or args.update_id, slug=args.slug or args.find_slug)
             print(json.dumps({"deleted_id": deleted_id}, ensure_ascii=False))
             return 0
 
+        # Find-only mode early — does not require title or content
+        if args.find_slug and args.print_found:
+            existing = find_post(cfg, slug=args.find_slug)
+            print(json.dumps(existing, ensure_ascii=False))
+            return 0
+
+        if args.find_title and args.print_found:
+            existing = find_post(cfg, title=args.find_title)
+            print(json.dumps(existing, ensure_ascii=False))
+            return 0
+
         data = load_json_arg(args.json, Path(args.input) if args.input else None)
+
+        # If markdown_file is provided, parse optional YAML frontmatter and merge into data
+        markdown_raw = None
+        if args.markdown_file:
+            markdown_raw = Path(args.markdown_file).read_text(encoding="utf-8")
+            fm, markdown = parse_frontmatter(markdown_raw)
+            for key in ("title", "slug", "excerpt", "meta_title", "meta_description",
+                        "feature_image", "status", "tags", "authors"):
+                if key in fm and key not in data:
+                    data[key] = fm[key]
+        else:
+            markdown = data.get("markdown")
+
         title = args.title or data.get("title")
         if not title:
             raise GhostPublishError("title is required")
 
-        markdown = Path(args.markdown_file).read_text(encoding="utf-8") if args.markdown_file else data.get("markdown")
         html = Path(args.html_file).read_text(encoding="utf-8") if args.html_file else data.get("html")
         lexical = data.get("lexical")
 
@@ -809,29 +935,38 @@ def main() -> int:
             if existing.get("id") and not existing.get("updated_at"):
                 existing = find_post(cfg, post_id=existing["id"])
 
-        if html is None and markdown is None and lexical is None:
+        content_provided = html is not None or markdown is not None or lexical is not None
+        meta_only = existing and not content_provided and _has_meta_args(args)
+
+        if not content_provided and not meta_only:
             raise GhostPublishError("provide markdown, html, or lexical content")
 
         image_map: Dict[str, str] = {}
-        for img in _iter_images(list(args.image) + list(data.get("images", []))):
-            path = Path(img["path"])
-            remote_url = upload_image(cfg, path)
-            image_map[path.name] = remote_url
-            image_map[str(path)] = remote_url
-            image_map[path.as_posix()] = remote_url
+        if content_provided:
+            for img in _iter_images(list(args.image) + list(data.get("images", []))):
+                path = Path(img["path"])
+                remote_url = upload_image(cfg, path)
+                image_map[path.name] = remote_url
+                image_map[str(path)] = remote_url
+                image_map[path.as_posix()] = remote_url
 
         source = args.use_source
-        post: Dict[str, Any] = {"title": title, "status": args.status or data.get("status", "draft")}
+        post: Dict[str, Any] = {"title": title}
+        # Only set status when explicitly provided or when creating a new post
+        explicit_status = args.status or data.get("status")
+        if explicit_status or not existing:
+            post["status"] = explicit_status or "draft"
 
-        if source == "lexical" and lexical is not None:
-            post["lexical"] = lexical
-        else:
-            if markdown is not None:
-                html = markdown_to_html(markdown, title=title)
-            if html is None:
-                raise GhostPublishError("html is required when writing with source=html")
-            html = replace_local_image_refs(html, image_map)
-            post["html"] = html
+        if content_provided:
+            if source == "lexical" and lexical is not None:
+                post["lexical"] = lexical
+            else:
+                if markdown is not None:
+                    html = markdown_to_html(markdown, title=title)
+                if html is None:
+                    raise GhostPublishError("html is required when writing with source=html")
+                html = replace_local_image_refs(html, image_map)
+                post["html"] = html
 
         if args.slug or data.get("slug"):
             post["slug"] = args.slug or data.get("slug")
@@ -840,8 +975,16 @@ def main() -> int:
             post["slug"] = generated
             eprint(f"[WARN] Auto-generated slug: {generated}")
 
-        if args.excerpt or data.get("excerpt"):
-            post["excerpt"] = args.excerpt or data.get("excerpt")
+        # Ghost Admin API stores manual excerpts in custom_excerpt; excerpt is read-only auto-generated.
+        custom_excerpt = args.excerpt or data.get("custom_excerpt") or data.get("excerpt")
+        if custom_excerpt:
+            post["custom_excerpt"] = custom_excerpt
+
+        if args.meta_title or data.get("meta_title"):
+            post["meta_title"] = args.meta_title or data.get("meta_title")
+
+        if args.meta_description or data.get("meta_description"):
+            post["meta_description"] = args.meta_description or data.get("meta_description")
 
         tags = list(args.tag) + list(data.get("tags", []))
         if tags:
