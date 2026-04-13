@@ -48,7 +48,6 @@ Required frontmatter for SEO and structural correctness:
 ---
 title: "文章主标题"
 slug: "wen-zhang-slug"
-excerpt: "一句话概括核心价值，50–100 字"
 meta_title: "SEO 标题 | IT小灶"
 meta_description: "SEO 描述，≤ 160 字符，包含关键词与行动召唤"
 feature_image: "feature-image.jpg"
@@ -59,9 +58,8 @@ tags: ["AI", "技术架构"]
 Guidelines:
 - `title`: do not repeat it as an H1/H2 in the body; Ghost already renders it as the page H1.
 - `slug`: short, lowercase English or short pinyin, no dates or punctuation.
-- `excerpt`: a concise value proposition (1–2 sentences). The script maps this to Ghost's `custom_excerpt` so it is preserved instead of auto-generated.
-- `meta_title`: keep it ≤ 60 chars; append `| IT小灶` for brand consistency.
-- `meta_description`: keep it ≤ 160 chars; include a primary keyword and a soft call to action.
+- `meta_description`: keep it ≤ 160 chars; include a primary keyword and a soft call to action. This is used for SEO and will NOT be rendered on the article page.
+- `excerpt` (optional): maps to Ghost's `custom_excerpt`. **Caution**: Ghost default themes render `custom_excerpt` prominently under the article title on the single-post page. Only use it if you intentionally want a sub-headline/summary to appear there; for pure SEO descriptions, rely on `meta_description` instead.
 - `tags`: check existing tags with `--list-tags` first; reuse canonical tags and avoid near-duplicates.
 
 ## Tag Management
@@ -187,7 +185,6 @@ python3 scripts/ghost_publish.py --delete --slug "ghost-test-publish"
   ---
   title: "文章主标题"
   slug: "wen-zhang-slug"
-  excerpt: "一句话概括核心价值"
   meta_title: "SEO 标题 | IT小灶"
   meta_description: "SEO 描述，≤ 160 字符"
   feature_image: "feature-image.jpg"
