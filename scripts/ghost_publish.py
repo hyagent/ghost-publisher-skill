@@ -42,6 +42,13 @@ class GhostConfig:
     api_version: str = DEFAULT_API_VERSION
 
 
+@dataclass
+class ContentConfig:
+    host: str
+    content_key: str
+    api_version: str = DEFAULT_API_VERSION
+
+
 def eprint(*args: object) -> None:
     print(*args, file=sys.stderr)
 
@@ -121,6 +128,14 @@ def load_config() -> GhostConfig:
     return GhostConfig(host=host, key_id=key_id, key_secret=key_secret, api_version=api_version)
 
 
+def load_content_config(cfg: GhostConfig) -> Optional["ContentConfig"]:
+    """Load Content API config. Returns None if GHOST_CONTENT_API_KEY is not set."""
+    content_key = _first_env("GHOST_CONTENT_API_KEY")
+    if not content_key:
+        return None
+    return ContentConfig(host=cfg.host, content_key=content_key, api_version=cfg.api_version)
+
+
 def make_jwt(cfg: GhostConfig, ttl_seconds: int = 300) -> str:
     header = {"alg": "HS256", "typ": "JWT", "kid": cfg.key_id}
     now = int(time.time())
@@ -140,12 +155,25 @@ def admin_base(cfg: GhostConfig) -> str:
     return urljoin(cfg.host + "/", "/ghost/api/admin/")
 
 
+def content_base(cc: "ContentConfig") -> str:
+    return urljoin(cc.host + "/", "/ghost/api/content/")
+
+
 def session(cfg: GhostConfig) -> requests.Session:
     s = requests.Session()
     s.headers.update({
         "Authorization": f"Ghost {make_jwt(cfg)}",
         "Accept-Version": cfg.api_version,
     })
+    return s
+
+
+def content_session(cc: "ContentConfig") -> requests.Session:
+    """Return a requests.Session pre-configured for the Content API (read-only)."""
+    s = requests.Session()
+    s.headers.update({"Accept-Version": cc.api_version})
+    # Content API key is passed as a query param, not a header — attach to session params
+    s.params = {"key": cc.content_key}  # type: ignore[assignment]
     return s
 
 
@@ -372,7 +400,7 @@ def markdown_to_html(md: str, title: Optional[str] = None) -> str:
             i += 1
             continue
 
-        if "|" in line:
+        if "|" in line and line.strip().startswith("|"):
             close_lists()
             close_blockquote()
             table_html, next_idx = parse_table(lines, i, inline)
@@ -456,7 +484,7 @@ def find_post(cfg: GhostConfig, *, post_id: Optional[str] = None, slug: Optional
 
     - By ID: direct GET /posts/{id}/
     - By slug: direct GET /posts/slug/{slug}/  (avoids full list fetch)
-    - By title: full list scan (Ghost has no title filter endpoint)
+    - By title: Admin API filter first (exact match via NQL), then full list scan as fallback
     Raises GhostPublishError if not found.
     """
     if post_id:
@@ -478,12 +506,25 @@ def find_post(cfg: GhostConfig, *, post_id: Optional[str] = None, slug: Optional
         return resp.json()["posts"][0]
 
     if title:
+        # Try Admin API filter first (NQL exact match on title, much faster than full scan)
         url = urljoin(admin_base(cfg), "posts/")
-        params = {"limit": "all", "fields": "id,title,slug,url,status,updated_at"}
+        params = {
+            "filter": f"title:'{title}'",
+            "fields": "id,title,slug,url,status,updated_at",
+            "limit": "5",
+        }
         resp = session(cfg).get(url, params=params, timeout=60)
-        if resp.status_code >= 300:
-            raise GhostPublishError(f"post lookup failed: {resp.status_code} {resp.text[:500]}")
-        for post in resp.json().get("posts", []):
+        if resp.status_code < 300:
+            for post in resp.json().get("posts", []):
+                if post.get("title") == title:
+                    return post
+
+        # Fallback: full list scan (catches titles with special chars that trip NQL quoting)
+        params_all = {"limit": "all", "fields": "id,title,slug,url,status,updated_at"}
+        resp2 = session(cfg).get(url, params=params_all, timeout=60)
+        if resp2.status_code >= 300:
+            raise GhostPublishError(f"post lookup failed: {resp2.status_code} {resp2.text[:500]}")
+        for post in resp2.json().get("posts", []):
             if post.get("title") == title:
                 return post
         raise GhostPublishError(f"post not found: title={title!r}")
@@ -502,6 +543,127 @@ def delete_post(cfg: GhostConfig, *, post_id: Optional[str] = None, slug: Option
     if resp.status_code != 204:
         raise GhostPublishError(f"post delete failed: {resp.status_code} {resp.text[:500]}")
     return pid
+
+
+# ---------------------------------------------------------------------------
+# Content API helpers — browse and search posts (read-only)
+# ---------------------------------------------------------------------------
+
+def list_posts(
+    cfg: GhostConfig,
+    *,
+    tag: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 20,
+    page: int = 1,
+    order: str = "updated_at desc",
+) -> None:
+    """Print a paginated list of posts using the Admin API.
+
+    Supports filtering by tag slug and status. Output is a JSON object with
+    ``total``, ``page``, ``limit``, and a ``posts`` array of summaries.
+
+    Args:
+        tag: Filter by tag slug (e.g. ``hermes``).
+        status: Filter by status: ``published``, ``draft``, ``all`` (default Admin API behaviour).
+        limit: Max posts per page (max 15 for public Content API; Admin API allows higher).
+        page: 1-based page number.
+        order: NQL order expression, e.g. ``updated_at desc`` or ``published_at desc``.
+    """
+    url = urljoin(admin_base(cfg), "posts/")
+    params: Dict[str, Any] = {
+        "fields": "id,title,slug,url,status,updated_at,published_at",
+        "limit": str(limit),
+        "page": str(page),
+        "order": order,
+    }
+    filters = []
+    if tag:
+        filters.append(f"tag:[{tag}]")
+    if status and status != "all":
+        filters.append(f"status:{status}")
+    if filters:
+        params["filter"] = "+".join(filters)
+
+    resp = session(cfg).get(url, params=params, timeout=60)
+    if resp.status_code >= 300:
+        raise GhostPublishError(f"list posts failed: {resp.status_code} {resp.text[:500]}")
+    data = resp.json()
+    posts = data.get("posts", [])
+    meta = data.get("meta", {}).get("pagination", {})
+    print(json.dumps({
+        "total": meta.get("total", len(posts)),
+        "page": meta.get("page", page),
+        "pages": meta.get("pages", 1),
+        "limit": meta.get("limit", limit),
+        "posts": [
+            {
+                "id": p.get("id"),
+                "title": p.get("title"),
+                "slug": p.get("slug"),
+                "status": p.get("status"),
+                "updated_at": p.get("updated_at"),
+                "published_at": p.get("published_at"),
+                "url": p.get("url"),
+            }
+            for p in posts
+        ],
+    }, ensure_ascii=False, indent=2))
+
+
+def search_posts(cfg: GhostConfig, keyword: str, *, limit: int = 15) -> None:
+    """Search posts by title keyword using the Admin API NQL contains operator.
+
+    Uses ``title:~'keyword'`` filter so Ghost does server-side substring matching
+    on the title field. Falls back to a client-side scan of the full list when
+    the NQL filter returns zero results (e.g. special characters in keyword).
+
+    Output: JSON object with ``keyword`` and a ``posts`` array of matches.
+    """
+    url = urljoin(admin_base(cfg), "posts/")
+    params: Dict[str, Any] = {
+        "filter": f"title:~'{keyword}'",
+        "fields": "id,title,slug,url,status,updated_at,published_at",
+        "limit": str(limit),
+        "order": "updated_at desc",
+    }
+    resp = session(cfg).get(url, params=params, timeout=60)
+    posts: List[Dict[str, Any]] = []
+    if resp.status_code < 300:
+        posts = resp.json().get("posts", [])
+
+    if not posts:
+        # Fallback: full list client-side substring match
+        eprint("[INFO] NQL filter returned no results, falling back to full list scan")
+        params_all = {
+            "fields": "id,title,slug,url,status,updated_at,published_at",
+            "limit": "all",
+            "order": "updated_at desc",
+        }
+        resp2 = session(cfg).get(url, params=params_all, timeout=60)
+        if resp2.status_code >= 300:
+            raise GhostPublishError(f"search posts failed: {resp2.status_code} {resp2.text[:500]}")
+        kw_lower = keyword.lower()
+        posts = [
+            p for p in resp2.json().get("posts", [])
+            if kw_lower in (p.get("title") or "").lower()
+        ][:limit]
+
+    print(json.dumps({
+        "keyword": keyword,
+        "count": len(posts),
+        "posts": [
+            {
+                "id": p.get("id"),
+                "title": p.get("title"),
+                "slug": p.get("slug"),
+                "status": p.get("status"),
+                "updated_at": p.get("updated_at"),
+                "url": p.get("url"),
+            }
+            for p in posts
+        ],
+    }, ensure_ascii=False, indent=2))
 
 
 # ---------------------------------------------------------------------------
@@ -746,6 +908,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--tag-alias-file", help="JSON file with tag alias mappings")
     p.add_argument("--skip-tag-check", action="store_true", help="Skip similar-tag conflict check on publish")
     p.add_argument("--bulk-meta-file", help="JSON file mapping slug -> {meta_title, meta_description, excerpt} for batch updates")
+    # Post browsing / search flags
+    p.add_argument("--list-posts", action="store_true", help="List posts (supports --status, --tag, --limit, --page, --order)")
+    p.add_argument("--search", metavar="KEYWORD", help="Search posts by title keyword substring")
+    p.add_argument("--limit", type=int, default=20, help="Max results for --list-posts or --search (default: 20)")
+    p.add_argument("--page", type=int, default=1, help="Page number for --list-posts (default: 1)")
+    p.add_argument("--order", default="updated_at desc", help="Sort order for --list-posts, e.g. 'updated_at desc' or 'published_at desc'")
     return p.parse_args()
 
 
@@ -885,6 +1053,22 @@ def main() -> int:
         # Bulk meta update mode
         if args.bulk_meta_file:
             bulk_update_meta(cfg, Path(args.bulk_meta_file))
+            return 0
+
+        # Post browse / search modes (read-only)
+        if args.list_posts:
+            list_posts(
+                cfg,
+                tag=args.tag[0] if args.tag else None,
+                status=args.status,
+                limit=args.limit,
+                page=args.page,
+                order=args.order,
+            )
+            return 0
+
+        if args.search:
+            search_posts(cfg, args.search, limit=args.limit)
             return 0
 
         # Handle delete mode early — does not require title or content

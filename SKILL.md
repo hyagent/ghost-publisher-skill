@@ -1,14 +1,14 @@
 ---
 name: ghost-publisher
-description: Publish or update Ghost posts with rich article content and local image uploads using the Ghost Admin API. Use when creating/updating posts from markdown, HTML, or structured JSON, uploading local images, working with Ghost Admin integrations and API keys, or managing tags.
+description: Publish, update, browse, and search Ghost posts using the Ghost Admin API (writes) and Content API (reads). Use when creating/updating posts from markdown, HTML, or structured JSON, uploading local images, finding or listing existing posts by tag/status/keyword, working with Ghost Admin integrations and API keys, or managing tags.
 ---
 
 # Ghost Publisher
 
 ## Security Rules (Critical)
 
-- **Treat `GHOST_ADMIN_API_KEY` and `GHOST_HOST` as black boxes**: The AI agent must NEVER read the actual values of these two environment variables into the conversation context. Do not use `echo`, `env`, `cat`, `grep`, or any other command to inspect or reveal their values. Invoke the helper script directly and let it read the variables internally.
-- **NEVER expose credential values**: Do not print, log, or return the values of `GHOST_ADMIN_API_KEY`, `GHOST_API_KEY`, `GHOST_HOST`, `GHOST_ADMIN_HOST`, `GHOST_URL`, or `GHOST_ADMIN_URL`. These values must remain inside the helper script only.
+- **Treat `GHOST_ADMIN_API_KEY`, `GHOST_CONTENT_API_KEY`, and `GHOST_HOST` as black boxes**: The AI agent must NEVER read the actual values of these environment variables into the conversation context. Do not use `echo`, `env`, `cat`, `grep`, or any other command to inspect or reveal their values. Invoke the helper script directly and let it read the variables internally.
+- **NEVER expose credential values**: Do not print, log, or return the values of `GHOST_ADMIN_API_KEY`, `GHOST_CONTENT_API_KEY`, `GHOST_API_KEY`, `GHOST_HOST`, `GHOST_ADMIN_HOST`, `GHOST_URL`, or `GHOST_ADMIN_URL`. These values must remain inside the helper script only.
 - **Never print secrets, headers, or raw API key material**.
 - **If credentials are missing**: When the script fails with a credential error, tell the user which environment variables are needed and ask them to set them. Do not attempt to read or guess the values.
 - **Privacy scrub before publish**: Before writing or publishing any article derived from real operations, replace all personally identifiable or sensitive information with generic placeholders. This includes:
@@ -24,7 +24,7 @@ description: Publish or update Ghost posts with rich article content and local i
 
 1. **Before using `ghost-publisher` (or any credential-bearing skill), review its security rules first.** This prevents accidental attempts to read or print environment variables into the conversation context.
 
-2. **Use the helper script's built-in flags for all lookups.** When you need to check API connectivity, find duplicate posts, or verify existing slugs, always use the wrapper script's native options (`--find-slug`, `--find-title`, `--print-found`, `--list-tags`, etc.) instead of writing custom Python or shell snippets that read `GHOST_API_KEY` or `GHOST_HOST` directly.
+2. **Use the helper script's built-in flags for all lookups.** When you need to check API connectivity, find duplicate posts, browse article lists, search by keyword, or verify existing slugs, always use the wrapper script's native options (`--find-slug`, `--find-title`, `--print-found`, `--list-posts`, `--search`, `--list-tags`, etc.) instead of writing custom Python or shell snippets that read `GHOST_API_KEY` or `GHOST_HOST` directly.
 
 3. **Redact PII in tool outputs before presenting them.** The Ghost Admin API JSON responses may contain author emails and other PII. When summarizing or quoting tool results, scan for fields like `email`, `password`, `token`, `key`, `secret`, `credential`, and replace them with placeholders (e.g., `yu***@gmail.com` or `<AUTHOR_EMAIL>`). Do not let raw PII sit in the conversation history.
 
@@ -198,6 +198,59 @@ python3 scripts/ghost_publish.py --delete --post-id <id>
 python3 scripts/ghost_publish.py --delete --slug "ghost-test-publish"
 ```
 
+## Post Browse & Search
+
+Use these commands to **discover existing posts** without knowing the exact slug or title. This is especially important when resuming work across sessions — always check what already exists before creating new posts.
+
+### List recent posts (default: 20, sorted by updated_at desc)
+```bash
+python3 scripts/ghost_publish.py --list-posts
+```
+
+### List posts with filters
+```bash
+# Filter by tag slug
+python3 scripts/ghost_publish.py --list-posts --tag hermes
+
+# Filter by status
+python3 scripts/ghost_publish.py --list-posts --status draft
+
+# Combine tag + status
+python3 scripts/ghost_publish.py --list-posts --tag hermes --status published
+
+# Custom page size and sort
+python3 scripts/ghost_publish.py --list-posts --limit 50 --page 2 --order "published_at desc"
+```
+
+Output fields: `id`, `title`, `slug`, `status`, `updated_at`, `published_at`, `url`.
+
+### Search posts by title keyword
+```bash
+python3 scripts/ghost_publish.py --search "关键词"
+python3 scripts/ghost_publish.py --search "docker" --limit 10
+```
+
+The search uses Ghost Admin API's NQL `title:~'keyword'` filter (server-side substring match on title). Falls back to a full list client-side scan if the NQL filter returns empty results (e.g. for titles with special characters).
+
+### Cross-session workflow for updating an existing post
+
+When memory refers to a post that was previously published but the slug is uncertain:
+
+1. **Search by keyword first**:
+   ```bash
+   python3 scripts/ghost_publish.py --search "文章主题关键词"
+   ```
+2. **Pick the matching slug from results**, then fetch full details:
+   ```bash
+   python3 scripts/ghost_publish.py --find-slug "confirmed-slug" --print-found
+   ```
+3. **Update using the confirmed slug**:
+   ```bash
+   python3 scripts/ghost_publish.py --find-slug "confirmed-slug" --markdown-file updated.md
+   ```
+
+Never skip step 1–2 and go straight to writing — always confirm the slug exists before updating.
+
 ## Writing Guidelines
 
 - Use the Ghost Admin API for writes; the Content API is read-only.
@@ -263,7 +316,8 @@ Author normalization (`_normalize_authors`):
 ## Environment Variables
 
 - Host: `GHOST_HOST` or `GHOST_ADMIN_HOST` or `GHOST_URL` or `GHOST_ADMIN_URL`
-- API key: `GHOST_API_KEY` or `GHOST_ADMIN_API_KEY`
+- Admin API key (required for writes and admin reads): `GHOST_ADMIN_API_KEY` (preferred) or `GHOST_API_KEY`
+- Content API key (optional, for public-content reads): `GHOST_CONTENT_API_KEY` — currently unused by the helper script because the Admin API already covers all read operations needed for post lookup and browsing. Set this if you need to integrate with external tools that require the Content API key.
 
 ## Verification Checklist
 
@@ -303,27 +357,18 @@ Check for:
 - Bold text in table cells visible (e.g., `**MiMo-V2-Pro**` appears bold)
 - No unwanted `<hr>` lines
 
-## Similarity Check
+## Duplicate Check Before Publishing
 
-When ready to publish:
-1. Fix all formatting issues in the draft
-2. **Check for similar posts** (recommended):
+Before creating a new post, always verify that no similar article already exists:
+
+1. **Search by title keyword**:
    ```bash
-   python3 scripts/ghost_publish.py \
-     --title "Title" \
-     --markdown-file draft.md \
-     --check-similar \
-     --auto-suggest \
-     --status draft
+   python3 scripts/ghost_publish.py --search "文章主题关键词"
    ```
-3. Based on similarity report, either:
-   - Update existing: Use `--find-slug` to update the correct post
-   - Create new: Use `--force-create` if the content is sufficiently different
+2. If results show a matching post: use `--find-slug` to update it instead of creating a new one.
+3. If no results: proceed with creating a new post.
 
-## Similarity Thresholds
-
-- >= 80%: High similarity → Strongly recommend update
-- 60-79%: Medium similarity → Manual judgment
+This manual check replaces any automated similarity scoring — the agent should use judgment based on title overlap and content intent.
 
 ## Markdown-to-HTML Conversion History
 
@@ -340,6 +385,7 @@ When ready to publish:
 5. **2026-04-10 fix**: Added symbol normalization to convert common LaTeX-style arrows (e.g., `$\rightarrow$`) to Unicode equivalents (`→`) to prevent raw LaTeX rendering in Ghost.
 6. **2026-04-11 fix**: Added tag management commands (`--list-tags`, `--merge-tags`, `--delete-empty-tags`), built-in tag aliases, and tag conflict detection to prevent tag proliferation.
 7. **2026-04-13 fix**: Added bulk metadata update (`--bulk-meta-file`) and allowed metadata-only updates for existing posts without requiring content re-upload.
+8. **2026-04-16 fix**: Added `--list-posts` and `--search` commands for post browsing and title keyword search. Improved `find_post` title lookup to use Admin API NQL filter first (avoids full list scan). Removed non-existent `--check-similar`/`--auto-suggest` flags from docs and replaced with a manual search-based duplicate-check workflow.
 
 If you encounter formatting issues in published Ghost articles:
 1. Check if the markdown uses tables, blockquotes, or inline formatting within tables
@@ -354,5 +400,6 @@ If you encounter formatting issues in published Ghost articles:
 ## References
 
 - `references/ghost-docs.md`: current Ghost API behavior relevant to this skill.
-- `references/ghost-llms-full.txt`: comprehensive Ghost Admin API documentation for LLM/agent indexing and detailed reference. Useful for resolving edge cases, understanding API nuances, or when the skill behavior needs updating.
-- `references/ghost-llms.txt`: Ghost documentation index for discovering available API sections.
+- `references/ghost-llms-full.txt`: comprehensive Ghost Admin API and Content API documentation for LLM/agent indexing. Useful for resolving edge cases, understanding API nuances, or when the skill behavior needs updating.
+- `references/content-rules.md`: content quality and writing rules for published articles.
+- `references/images-api.md`: notes on the Ghost images upload API.
