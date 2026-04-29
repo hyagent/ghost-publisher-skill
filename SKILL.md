@@ -77,7 +77,7 @@ tags: ["标签一", "标签二"]
 Guidelines:
 - `title`: do not repeat it as an H1/H2 in the body; Ghost already renders it as the page H1.
 - `slug`: short, lowercase English or short pinyin, no dates or punctuation.
-- `meta_description`: keep it ≤ 160 chars; include a primary keyword and a soft call to action. This is used for SEO and will NOT be rendered on the article page.
+- `meta_description`: keep it ≤ 160 chars. Write it as the direct answer to the question this article addresses — using the vocabulary the target reader would use when searching. Avoid marketing taglines. This is used for SEO and will NOT be rendered on the article page.
 - `excerpt` (optional): maps to Ghost's `custom_excerpt`. **Caution**: Ghost default themes render `custom_excerpt` prominently under the article title on the single-post page. Only use it if you intentionally want a sub-headline/summary to appear there; for pure SEO descriptions, rely on `meta_description` instead.
 - `tags`: **max 2 tags**, must reflect the article's **core topic** (not every keyword that appears). Run `--list-tags` first and reuse canonical tags. Avoid broad keyword-stuffing tags (e.g., do not tag every article with a general term like `AI` unless AI is the primary subject). When in doubt, choose the narrower/specific tag over the broad one.
 
@@ -321,26 +321,35 @@ Author normalization (`_normalize_authors`):
 
 ## Verification Checklist
 
-1. **Writing style**
+1. **GEO content quality** (check before publishing)
+   - Topic scope is narrow and can be stated in one sentence
+   - Each H2/H3 corresponds to a user sub-question, not a generic label
+   - Article contains at least 2 of: definition, comparison, quantified data, concrete example
+   - Every quantified claim has a named, traceable source
+   - Core articles: ≥ 1,500 words; focused articles: ≥ 800 words
+   - `meta_description` reads like an answer to a question, not a marketing tagline
+   - See `references/content-rules.md` and `references/technical-review-writing-guide.md` for full rules
+
+2. **Writing style**
    - Objective, factual, and concise
    - Avoid unnecessary hype, vague praise, or reader-assumption language
 
-2. **HTML rendering correctness**
+3. **HTML rendering correctness**
    - Headings render in the expected hierarchy
    - Bullet lists, numbered lists, blockquotes, tables, and code blocks render cleanly
    - Inline code, links, and emphasis are preserved after markdown-to-HTML conversion
 
-3. **Layout and readability**
+4. **Layout and readability**
    - Paragraph spacing is consistent
    - List nesting is clear
    - Code fences are closed and syntax highlighting is sensible
 
-4. **Clickable URL / link correctness**
+5. **Clickable URL / link correctness**
    - Use Markdown links (`[text](https://...)`) for source URLs you want readers to click
    - Avoid bare URLs when the display text matters
    - Confirm each URL points to the intended page and uses the correct anchor if present
 
-5. **Final verification**
+6. **Final verification**
    - Open the draft in Ghost and inspect the rendered result
 
 ## Browser Verification

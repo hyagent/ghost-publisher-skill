@@ -1,118 +1,213 @@
-# 技术评测文章写作指南
+# Article Structure Templates
 
-## 内容结构模板
+These templates cover the most common article types. Each maps to one of the high-impact GEO content types (comparison, definition, how-to, factual reference). Choose the template that matches the article's primary purpose, then adapt section headings to fit the subject.
 
-### 1. 产品简介
-- 一句话定义产品
-- 官网 + GitHub 链接
-- 许可证 + 最新版本
-
-### 2. 调研目标
-明确说明文章目的和受众。
-
-### 3. 迁移/对比维度（分节论述）
-
-#### 3.1 迁移方法与便利程度
-- **官方工具**：是否有官方迁移工具/对比文档
-- **社区反馈**：真实用户的迁移经验（正面 + 负面）
-- **注意事项**：迁移过程中的已知问题
-
-#### 3.2 解决的痛点
-每个痛点用以下结构：
-- **产品A的设计**：客观描述现状
-- **产品B的设计**：客观描述替代方案
-- **社区验证**：真实用户反馈（引用来源）
-- **注意**：避免主观判断，只陈述事实
-
-#### 3.3 已知问题与坑
-- 明确列出产品B的缺陷
-- 包含负面用户反馈（引用来源）
-- 说明这些缺陷对用户的影响
-
-#### 3.4 实际使用体验
-- 收集同时使用两者的用户经验
-- 混合使用策略（如果有）
-
-### 4. 决策建议
-
-#### 4.1 适合迁移/选择的情况
-- 具体场景1
-- 具体场景2
-...
-
-#### 4.2 不建议迁移/选择的情况
-- 具体场景1
-- 具体场景2
-...
-
-#### 4.3 混合策略（如适用）
-部分用户如何同时使用两者。
-
-### 5. 客观总结表格
-| 维度 | 产品A | 产品B |
-|------|-------|-------|
-| 维度1 | ... | ... |
-| 维度2 | ... | ... |
-
-### 6. 参考来源
-- 官方文档链接
-- 社区讨论链接（Reddit、GitHub issues等）
-- 免责声明
+All templates are subject to the rules in `content-rules.md`. Key constraints to keep in mind while writing:
+- Each H2/H3 should answer a user sub-question
+- Include at least 2 of: definition, comparison, quantified data, concrete example
+- Every quantified claim needs a named source
+- Word count: ≥ 1,500 words for core articles, ≥ 800 words for focused sub-topics
 
 ---
 
-## 写作原则
+## Template 1: Comparison Article
 
-### 1. 有理有据
-- 每个论断都要有来源
-- 使用直接引用（blockquote）标注用户原话
-- 标注信息来源（官方文档 / 社区讨论）
+**Use when**: comparing two or more tools, approaches, frameworks, products, or strategies.
 
-### 2. 客观公正
-- 不夸大任何一方
-- 正面和负面反馈都要包含
-- 避免主观形容词（"更好"、"更优秀"），改用客观描述
+**Why prioritize this type**: comparison articles have the highest AI absorption rate. They contain definitions, contrast data, and decision criteria — all high-value evidence units.
 
-### 3. 可验证性
-- 所有链接都要可点击
-- 所有数据都要有来源
-- 不确定的信息标注"声称"、" reportedly"
+### Structure
 
-### 4. 承认局限性
-- 缺乏量化数据时明确说明
-- 社区反馈可能有偏差时说明
-- 添加免责声明
+```
+## What is [A]? / What is [B]?
+(one-paragraph definition of each; establishes baseline for the comparison)
+
+## When to use [A]
+(concrete scenarios, constraints, prerequisites)
+
+## When to use [B]
+(concrete scenarios, constraints, prerequisites)
+
+## Head-to-head: [Dimension 1]
+(e.g., performance, cost, setup complexity — pick the dimensions that matter most to the reader)
+
+## Head-to-head: [Dimension 2]
+
+## Head-to-head: [Dimension 3]
+
+## Known limitations and tradeoffs
+(cover weaknesses of both sides; cite community or official sources)
+
+## Summary comparison table
+| Dimension    | A   | B   |
+|---|---|---|
+| …            | …   | …   |
+
+## Decision guide: which to choose
+(structured recommendations by use case, not a blanket verdict)
+
+## References
+```
+
+### Writing rules specific to comparisons
+
+- Do not declare a winner without criteria. "A is better" is not a finding; "A outperforms B under load > 10k RPS (benchmark source)" is.
+- Positive and negative evidence must be present for both sides.
+- For community-sourced claims, use blockquotes with attribution:
+  ```
+  > "quote from user"
+  > — Source (Reddit / GitHub Issues / forum)
+  ```
+- Add a disclaimer if the comparison relies on community feedback that may be biased.
 
 ---
 
-## 常见错误避免
+## Template 2: Definition / Explanation Article
 
-### ❌ 错误示例
-- "产品B比产品A更好"（主观判断）
-- "用户报告节省了50%成本"（无来源数据）
-- "产品A有严重缺陷"（无具体证据）
+**Use when**: explaining what something is, how it works, or why it exists.
 
-### ✅ 正确示例
-- "产品B采用X设计，产品A采用Y设计"（客观对比）
-- "Reddit用户反馈：'quote'"（引用来源）
-- "社区报告产品A在Z场景下存在问题"（具体场景）
+**Why prioritize this type**: definition articles are the second-highest AI absorption type. Clear, structured definitions are extracted verbatim or near-verbatim by AI systems.
+
+### Structure
+
+```
+## What is [topic]?
+(clear, direct definition in the first sentence; no preamble)
+
+## Why [topic] exists / the problem it solves
+(concrete motivation; what breaks without it)
+
+## How [topic] works
+(mechanism, architecture, or process — as concrete as the subject allows)
+
+## Key concepts and terminology
+(define sub-terms that are necessary to understand the topic)
+
+## [Topic] vs [related concept]
+(at least one comparison to an adjacent concept clarifies the boundaries)
+
+## Common misconceptions
+(address what readers often get wrong; strengthens semantic authority)
+
+## Practical examples
+(at least one concrete, end-to-end example)
+
+## Limitations and when [topic] does not apply
+(sets honest boundaries; prevents misuse)
+
+## References
+```
+
+### Writing rules specific to definitions
+
+- The definition in the first H2 must be self-contained — a reader (or AI) extracting just that paragraph should get a complete, accurate answer.
+- Avoid circular definitions ("X is the process of doing X").
+- Prefer active voice: "X converts Y into Z" over "Y is converted by X".
 
 ---
 
-## 引用格式
+## Template 3: How-to / Step-by-step Article
 
-### 社区反馈引用
-```markdown
-> "用户原话"
-> — 来源（Reddit / GitHub / Twitter）
+**Use when**: guiding a reader through a process — setup, migration, configuration, debugging, or any sequential task.
+
+### Structure
+
+```
+## What this guide covers
+(scope: what will be set up/achieved, the starting state, and any prerequisites)
+
+## Prerequisites
+(list explicitly: tools, access levels, versions, prior knowledge)
+
+## Step 1: [Action]
+(one coherent action per step; include the command or code, and what success looks like)
+
+## Step 2: [Action]
+
+## Step N: [Action]
+
+## Verification
+(how to confirm the process succeeded end-to-end)
+
+## Common errors and fixes
+(the top 3–5 failure modes; each with symptom, cause, and fix)
+
+## Limitations and edge cases
+(where this guide does and does not apply)
+
+## References
 ```
 
-### 官方文档引用
-```markdown
-官方文档：[标题](链接)
+### Writing rules specific to how-tos
+
+- Each step heading should contain a verb: "Install the dependency", not "Installation".
+- After every non-trivial command or code block, state what the expected output or state change is.
+- Do not skip steps because they seem "obvious". State prerequisites and expected environment explicitly.
+- "Common errors" is a high-value section: AI systems use it to answer debugging queries that would otherwise miss the guide entirely.
+
+---
+
+## Template 4: Factual Reference / Data Summary
+
+**Use when**: presenting a curated set of facts, data points, timelines, or specifications that a reader needs to look up rather than act on.
+
+### Structure
+
+```
+## What this reference covers
+(scope and intended audience)
+
+## [Data category 1]
+(table or structured list; every row has a source if the data is quantified)
+
+## [Data category 2]
+
+## Methodology / data sources
+(how the data was gathered, when it was last updated, known gaps)
+
+## Changelog
+(if the reference is updated over time, list what changed and when)
+
+## References
 ```
 
-### 免责声明
-```markdown
-*本文基于公开社区讨论整理，不构成技术建议。*
-```
+### Writing rules specific to factual references
+
+- Every quantified data point needs a source inline, not just in the references section.
+- State the data collection date. Stale data without a date is misleading.
+- For data with significant variance across sources, note the range and explain the discrepancy.
+
+---
+
+## Universal Writing Principles
+
+These apply to all article types.
+
+### Evidence and attribution
+
+- Every claim that can be verified should be. If it cannot, say so.
+- Use direct quotation (`> "…" — Source`) for community or user feedback.
+- Use "reportedly" or "according to [source]" for claims that are plausible but not independently verified.
+- Do not use vague attribution: "research shows", "experts say", "it is widely believed".
+
+### Objectivity
+
+- Avoid subjective evaluation words ("simple", "powerful", "revolutionary") unless quoting a source.
+- Distinguish between what is observed/measured and what is interpreted or inferred.
+- Positive and negative aspects must both appear; omitting known weaknesses is a credibility failure.
+
+### Verifiability
+
+- All links must be clickable and point to the intended resource.
+- All data has a source, year, and (where relevant) methodology note.
+- Uncertain information is labeled; the reader should never have to guess which claims are speculative.
+
+### Acknowledging limits
+
+- State what the article does not cover.
+- When quantitative data is unavailable, say so: "No published benchmark exists for this comparison as of [date]."
+- Add a disclaimer when the article draws primarily on community discussion:
+  ```
+  *This article is based on publicly available community discussion and official documentation.
+   It does not constitute professional advice.*
+  ```
