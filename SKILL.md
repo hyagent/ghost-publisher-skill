@@ -349,23 +349,6 @@ Author normalization (`_normalize_authors`):
    - Avoid bare URLs when the display text matters
    - Confirm each URL points to the intended page and uses the correct anchor if present
 
-6. **Final verification**
-   - Open the draft in Ghost and inspect the rendered result
-
-## Browser Verification
-
-Always verify published Ghost drafts with PinchTab before marking complete:
-```bash
-PINCHTAB_URL=http://localhost:9868 pinchtab nav "<ghost-draft-url>"
-sleep 2
-PINCHTAB_URL=http://localhost:9868 pinchtab screenshot --full -o draft.png
-```
-Check for:
-- Tables rendered correctly (not as pipe-delimited text)
-- Blockquotes styled properly (not showing raw `>` symbols)
-- Bold text in table cells visible (e.g., `**MiMo-V2-Pro**` appears bold)
-- No unwanted `<hr>` lines
-
 ## Duplicate Check Before Publishing
 
 Before creating a new post, always verify that no similar article already exists:
@@ -395,6 +378,7 @@ This manual check replaces any automated similarity scoring — the agent should
 6. **2026-04-11 fix**: Added tag management commands (`--list-tags`, `--merge-tags`, `--delete-empty-tags`), built-in tag aliases, and tag conflict detection to prevent tag proliferation.
 7. **2026-04-13 fix**: Added bulk metadata update (`--bulk-meta-file`) and allowed metadata-only updates for existing posts without requiring content re-upload.
 8. **2026-04-16 fix**: Added `--list-posts` and `--search` commands for post browsing and title keyword search. Improved `find_post` title lookup to use Admin API NQL filter first (avoids full list scan). Removed non-existent `--check-similar`/`--auto-suggest` flags from docs and replaced with a manual search-based duplicate-check workflow.
+9. **2026-04-27 fix**: Fixed table detection bug where any line containing `|` (including Markdown links like `[title | site](url)`) was incorrectly treated as a table row. Changed condition from `if "|" in line:` to `if line.strip().startswith("|")`.
 
 If you encounter formatting issues in published Ghost articles:
 1. Check if the markdown uses tables, blockquotes, or inline formatting within tables

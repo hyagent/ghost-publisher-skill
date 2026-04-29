@@ -400,7 +400,7 @@ def markdown_to_html(md: str, title: Optional[str] = None) -> str:
             i += 1
             continue
 
-        if "|" in line and line.strip().startswith("|"):
+        if line.strip().startswith("|"):
             close_lists()
             close_blockquote()
             table_html, next_idx = parse_table(lines, i, inline)

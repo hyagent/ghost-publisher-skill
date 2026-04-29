@@ -134,10 +134,23 @@ The article's language should match the natural language a reader would use when
 
 ---
 
-## 9. Writing Defaults
+## 9. Analysis & Interpretation Articles
+
+When the article summarizes, analyzes, or interprets an external source (a paper, blog post, report, etc.):
+
+1. **Objective observer POV**: Maintain a third-person observer perspective throughout. Use phrases like "The article argues…" or "The authors point out…". Never use first-person pronouns ("I", "we") unless directly quoting the source author.
+2. **Scan-friendly structure**: Use descriptive H3 headings for each core insight. Bold the most critical sentence within each paragraph so skimmers capture the essence.
+3. **Neutral attribution**: Open by neutrally naming the source — publication name, article title, and a clickable URL — without subjective hype words ("I read a fascinating article…", "recently…").
+4. **Focus on "why" and "what it means"**: Go beyond summarizing *what* the source says. Extract the underlying mechanisms, structural causes, and broader implications.
+5. **No preaching**: End with a neutral summary or logical conclusion, not a motivational call to action or prescriptive command to the reader.
+
+---
+
+## 10. Writing Defaults
 
 - Favor objective technical writing over opinionated phrasing.
 - Do not assume the reader's background, skill level, or prior knowledge.
 - Prefer concrete descriptions of facts, process, constraints, results, evidence, tradeoffs, and boundaries.
 - When relevant, include: the problem or goal, the steps taken, what was observed or measured, limitations and edge cases, where the approach applies and where it does not.
+- Keep titles concise and focused on the core topic. Remove supplementary clauses that dilute the main subject. Keep titles under 60 characters where possible. The title should reflect what the article *is* about, not what it *also* covers.
 - For markdown workflows, normalize spacing and heading structure before publish: strip a leading title heading if it matches the post title, keep one blank line between blocks, normalize list markers and numbering.
