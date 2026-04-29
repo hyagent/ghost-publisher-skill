@@ -26,7 +26,7 @@ description: Publish, update, browse, and search Ghost posts using the Ghost Adm
 
 2. **Use the helper script's built-in flags for all lookups.** When you need to check API connectivity, find duplicate posts, browse article lists, search by keyword, or verify existing slugs, always use the wrapper script's native options (`--find-slug`, `--find-title`, `--print-found`, `--list-posts`, `--search`, `--list-tags`, etc.) instead of writing custom Python or shell snippets that read `GHOST_API_KEY` or `GHOST_HOST` directly.
 
-3. **Redact PII in tool outputs before presenting them.** The Ghost Admin API JSON responses may contain author emails and other PII. When summarizing or quoting tool results, scan for fields like `email`, `password`, `token`, `key`, `secret`, `credential`, and replace them with placeholders (e.g., `yu***@gmail.com` or `<AUTHOR_EMAIL>`). Do not let raw PII sit in the conversation history.
+3. **Redact PII in tool outputs before presenting them.** The Ghost Admin API JSON responses may contain author emails and other PII. When summarizing or quoting tool results, scan for fields like `email`, `password`, `token`, `key`, `secret`, `credential`, and replace them with placeholders (e.g., `us***@example.com` or `<AUTHOR_EMAIL>`). Do not let raw PII sit in the conversation history.
 
 ## Skill Maintenance & Generalization Rule (Critical for Future Edits)
 
@@ -85,12 +85,15 @@ Guidelines:
 
 The script includes built-in tag normalization and maintenance tools to prevent tag proliferation.
 
-### Built-in tag aliases
+### Tag aliases
 
-The script automatically maps common synonymous tags to canonical names:
-- `Hermes Agent` → `Hermes`
-- `AI Agent` → `Agent`
-- `记忆` → `Memory`
+The script supports tag alias mapping to collapse synonymous tags to a canonical name. Aliases are configured via the `GHOST_TAG_ALIASES` environment variable (JSON object):
+
+```bash
+export GHOST_TAG_ALIASES='{"AI Agent": "Agent", "机器学习": "ML"}'
+```
+
+Keys are variant spellings; values are the canonical tag names. The script applies aliases before any tag is written to Ghost.
 
 ### CLI commands
 
@@ -131,7 +134,7 @@ When creating or updating a post, you must prevent tag proliferation through act
 4. **Align with the site's content boundaries**. Tags should map to the site's established content pillars. Do not introduce one-off tags that do not fit the overall taxonomy.
 5. **Reuse existing tags** whenever possible. Do not invent a new tag if an existing one covers the same concept.
 6. **Do not create near-duplicate tags**. If `--list-tags` shows a tag that is identical, contains, or highly similar (edit distance ≤ 2) to your intended tag, you must use the existing tag instead.
-7. **Use built-in aliases**. The script automatically collapses `Hermes Agent` → `Hermes`, `AI Agent` → `Agent`, `记忆` → `Memory`. Rely on this mechanism rather than manual cleanup.
+7. **Use tag aliases**. Configure `GHOST_TAG_ALIASES` in your environment to automatically collapse synonymous tags to canonical names. Rely on this mechanism rather than manual cleanup.
 8. **Merge existing duplicates immediately**. If you discover two live tags that mean the same thing during your work, merge them on the spot with `--merge-tags` instead of leaving them for later.
 9. **Skip the check only when certain**. Use `--skip-tag-check` only if the user explicitly overrides the warning.
 
@@ -210,13 +213,13 @@ python3 scripts/ghost_publish.py --list-posts
 ### List posts with filters
 ```bash
 # Filter by tag slug
-python3 scripts/ghost_publish.py --list-posts --tag hermes
+python3 scripts/ghost_publish.py --list-posts --tag tag-slug
 
 # Filter by status
 python3 scripts/ghost_publish.py --list-posts --status draft
 
 # Combine tag + status
-python3 scripts/ghost_publish.py --list-posts --tag hermes --status published
+python3 scripts/ghost_publish.py --list-posts --tag tag-slug --status published
 
 # Custom page size and sort
 python3 scripts/ghost_publish.py --list-posts --limit 50 --page 2 --order "published_at desc"
@@ -322,6 +325,7 @@ Author normalization (`_normalize_authors`):
 - Host: `GHOST_HOST` or `GHOST_ADMIN_HOST` or `GHOST_URL` or `GHOST_ADMIN_URL`
 - Admin API key (required for writes and admin reads): `GHOST_ADMIN_API_KEY` (preferred) or `GHOST_API_KEY`
 - Content API key (optional, for public-content reads): `GHOST_CONTENT_API_KEY` — currently unused by the helper script because the Admin API already covers all read operations needed for post lookup and browsing. Set this if you need to integrate with external tools that require the Content API key.
+- Tag aliases (optional): `GHOST_TAG_ALIASES` — JSON object mapping variant tag spellings to canonical names (e.g. `'{"AI Agent": "Agent"}'`). Applied automatically before any tag is written.
 
 ## Verification Checklist
 
@@ -366,34 +370,6 @@ Before creating a new post, always verify that no similar article already exists
 
 This manual check replaces any automated similarity scoring — the agent should use judgment based on title overlap and content intent.
 
-## Markdown-to-HTML Conversion History
-
-1. **Initial version**: Only handled headings, lists, code blocks, and inline formatting (bold/italic/links/images)
-2. **2026-04-03 fix #1**: Added support for:
-   - **Tables**: `| col1 | col2 |` → `<table>` with `<thead>` and `<tbody>`
-   - **Blockquotes**: `> text` → `<blockquote>` with recursive markdown parsing for nested content
-3. **2026-04-03 fix #2**: Fixed table cell inline formatting:
-   - **Root cause**: `parse_table()` was defined before `inline()` in the same function scope, but Python closure rules prevented access
-   - **Solution**: Pass `inline` as a parameter to `parse_table(lines, start_idx, inline_fn)`
-   - **Result**: `**bold**` in table cells now correctly converts to `<strong>bold</strong>`
-4. **2026-04-05 fix**: Added support for horizontal rules:
-   - `---` or `***` → `<hr />`
-5. **2026-04-10 fix**: Added symbol normalization to convert common LaTeX-style arrows (e.g., `$\rightarrow$`) to Unicode equivalents (`→`) to prevent raw LaTeX rendering in Ghost.
-6. **2026-04-11 fix**: Added tag management commands (`--list-tags`, `--merge-tags`, `--delete-empty-tags`), built-in tag aliases, and tag conflict detection to prevent tag proliferation.
-7. **2026-04-13 fix**: Added bulk metadata update (`--bulk-meta-file`) and allowed metadata-only updates for existing posts without requiring content re-upload.
-8. **2026-04-16 fix**: Added `--list-posts` and `--search` commands for post browsing and title keyword search. Improved `find_post` title lookup to use Admin API NQL filter first (avoids full list scan). Removed non-existent `--check-similar`/`--auto-suggest` flags from docs and replaced with a manual search-based duplicate-check workflow.
-9. **2026-04-27 fix**: Fixed table detection bug where any line containing `|` (including Markdown links like `[title | site](url)`) was incorrectly treated as a table row. Changed condition from `if "|" in line:` to `if line.strip().startswith("|")`.
-
-If you encounter formatting issues in published Ghost articles:
-1. Check if the markdown uses tables, blockquotes, or inline formatting within tables
-2. Verify the current `markdown_to_html()` function handles them correctly
-3. Run a quick Python test before publishing:
-   ```python
-   from scripts.ghost_publish import markdown_to_html
-   html = markdown_to_html("| **A** | B |\n|---|---|\n| **C** | D |")
-   assert '<strong>' in html, "Bold not working in tables!"
-   ```
-
 ## References
 
 **Read before writing any article** (required for every content creation task):
@@ -404,3 +380,4 @@ If you encounter formatting issues in published Ghost articles:
 - `references/ghost-docs.md`: current Ghost API behavior relevant to this skill.
 - `references/ghost-llms-full.txt`: comprehensive Ghost Admin API and Content API documentation for LLM/agent indexing.
 - `references/images-api.md`: notes on the Ghost images upload API.
+- `references/markdown-converter-changelog.md`: capability summary and fix history for the built-in `markdown_to_html()` function; read when debugging rendering issues.

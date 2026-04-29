@@ -28,13 +28,13 @@ Use this skill when the user asks for an inventory of Ghost articles, themes, pu
 2. **再查原始 session JSONL 日志**
    - 不要只信摘要；摘要可能漏掉“最后一次发布”或“草稿改发布”的原子动作。
    - 用 `grep` / `grep -R` 直接扫 `~/.hermes/sessions/*.jsonl`，重点看：
-     - `hitorch.cn/`
+     - 站点域名（如你的 Ghost 博客域名）
      - `slug`
      - `status": "published"`
      - `status": "draft"`
      - 文章标题片段
    - 如果今天的会话很多，优先按日期限定，例如：
-     - `~/.hermes/sessions/20260410*.jsonl`
+     - `~/.hermes/sessions/YYYYMMDD*.jsonl`
 
 3. **确认“真文章”而不是推荐卡片**
    - Ghost 首页或文章页里出现的推荐文章、相关内容卡片、站点推荐，不要自动算入本次统计。
@@ -60,10 +60,10 @@ Use this skill when the user asks for an inventory of Ghost articles, themes, pu
 ## Useful grep patterns
 
 ```bash
-grep -R -n 'status\\": \\\"published\\\"' ~/.hermes/sessions/20260410*.jsonl
-grep -R -n 'hitorch.cn/' ~/.hermes/sessions/20260410*.jsonl
-grep -R -n 'slug\\": \\\"' ~/.hermes/sessions/20260410*.jsonl
-grep -R -n 'ghost-publisher|published|draft|url\\":' ~/.hermes/sessions/20260410*.jsonl
+grep -R -n 'status\\": \\\"published\\\"' ~/.hermes/sessions/YYYYMMDD*.jsonl
+grep -R -n 'your-ghost-domain.com/' ~/.hermes/sessions/YYYYMMDD*.jsonl
+grep -R -n 'slug\\": \\\"' ~/.hermes/sessions/YYYYMMDD*.jsonl
+grep -R -n 'ghost-publisher|published|draft|url\\":' ~/.hermes/sessions/YYYYMMDD*.jsonl
 ```
 
 ## Output shape

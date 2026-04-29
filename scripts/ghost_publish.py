@@ -19,15 +19,23 @@ import requests
 
 DEFAULT_API_VERSION = os.environ.get("GHOST_API_VERSION", "v6.0")
 
-# Default tag aliases to prevent synonymous tag proliferation.
-# Keys are forbidden/tag variants; values are the canonical tag names.
-DEFAULT_TAG_ALIASES: Dict[str, str] = {
-    "Hermes Agent": "Hermes",
-    "hermes agent": "Hermes",
-    "AI Agent": "Agent",
-    "ai agent": "Agent",
-    "记忆": "Memory",
-}
+# Tag aliases to prevent synonymous tag proliferation.
+# Keys are variant spellings; values are the canonical tag names.
+# Configure via GHOST_TAG_ALIASES env var (JSON object).
+# Example: GHOST_TAG_ALIASES='{"AI Agent": "Agent", "机器学习": "ML"}'
+def _load_tag_aliases() -> Dict[str, str]:
+    raw = os.environ.get("GHOST_TAG_ALIASES", "")
+    if not raw:
+        return {}
+    try:
+        aliases = json.loads(raw)
+        if isinstance(aliases, dict):
+            return {str(k): str(v) for k, v in aliases.items()}
+    except Exception:
+        pass
+    return {}
+
+DEFAULT_TAG_ALIASES: Dict[str, str] = _load_tag_aliases()
 
 
 class GhostPublishError(RuntimeError):
