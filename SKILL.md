@@ -26,7 +26,7 @@ description: Publish, update, browse, and search Ghost posts using the Ghost Adm
 
 2. **Use the helper script's built-in flags for all lookups.** When you need to check API connectivity, find duplicate posts, browse article lists, search by keyword, or verify existing slugs, always use the wrapper script's native options (`--find-slug`, `--find-title`, `--print-found`, `--list-posts`, `--search`, `--list-tags`, etc.) instead of writing custom Python or shell snippets that read `GHOST_API_KEY` or `GHOST_HOST` directly.
 
-3. **Redact PII in tool outputs before presenting them.** The Ghost Admin API JSON responses may contain author emails and other PII. When summarizing or quoting tool results, scan for fields like `email`, `password`, `token`, `key`, `secret`, `credential`, and replace them with placeholders (e.g., `yu***@gmail.com` or `<AUTHOR_EMAIL>`). Do not let raw PII sit in the conversation history.
+3. **Redact PII in tool outputs before presenting them.** The Ghost Admin API JSON responses may contain author emails and other PII. When summarizing or quoting tool results, scan for fields like `email`, `password`, `token`, `key`, `secret`, `credential`, and replace them with placeholders (e.g., `us***@example.com` or `<AUTHOR_EMAIL>`). Do not let raw PII sit in the conversation history.
 
 ## Skill Maintenance & Generalization Rule (Critical for Future Edits)
 
@@ -77,7 +77,7 @@ tags: ["标签一", "标签二"]
 Guidelines:
 - `title`: do not repeat it as an H1/H2 in the body; Ghost already renders it as the page H1.
 - `slug`: short, lowercase English or short pinyin, no dates or punctuation.
-- `meta_description`: keep it ≤ 160 chars; include a primary keyword and a soft call to action. This is used for SEO and will NOT be rendered on the article page.
+- `meta_description`: keep it ≤ 160 chars. Write it as the direct answer to the question this article addresses — using the vocabulary the target reader would use when searching. Avoid marketing taglines. This is used for SEO and will NOT be rendered on the article page.
 - `excerpt` (optional): maps to Ghost's `custom_excerpt`. **Caution**: Ghost default themes render `custom_excerpt` prominently under the article title on the single-post page. Only use it if you intentionally want a sub-headline/summary to appear there; for pure SEO descriptions, rely on `meta_description` instead.
 - `tags`: **max 2 tags**, must reflect the article's **core topic** (not every keyword that appears). Run `--list-tags` first and reuse canonical tags. Avoid broad keyword-stuffing tags (e.g., do not tag every article with a general term like `AI` unless AI is the primary subject). When in doubt, choose the narrower/specific tag over the broad one.
 
@@ -85,12 +85,15 @@ Guidelines:
 
 The script includes built-in tag normalization and maintenance tools to prevent tag proliferation.
 
-### Built-in tag aliases
+### Tag aliases
 
-The script automatically maps common synonymous tags to canonical names:
-- `Hermes Agent` → `Hermes`
-- `AI Agent` → `Agent`
-- `记忆` → `Memory`
+The script supports tag alias mapping to collapse synonymous tags to a canonical name. Aliases are configured via the `GHOST_TAG_ALIASES` environment variable (JSON object):
+
+```bash
+export GHOST_TAG_ALIASES='{"AI Agent": "Agent", "机器学习": "ML"}'
+```
+
+Keys are variant spellings; values are the canonical tag names. The script applies aliases before any tag is written to Ghost.
 
 ### CLI commands
 
@@ -131,7 +134,7 @@ When creating or updating a post, you must prevent tag proliferation through act
 4. **Align with the site's content boundaries**. Tags should map to the site's established content pillars. Do not introduce one-off tags that do not fit the overall taxonomy.
 5. **Reuse existing tags** whenever possible. Do not invent a new tag if an existing one covers the same concept.
 6. **Do not create near-duplicate tags**. If `--list-tags` shows a tag that is identical, contains, or highly similar (edit distance ≤ 2) to your intended tag, you must use the existing tag instead.
-7. **Use built-in aliases**. The script automatically collapses `Hermes Agent` → `Hermes`, `AI Agent` → `Agent`, `记忆` → `Memory`. Rely on this mechanism rather than manual cleanup.
+7. **Use tag aliases**. Configure `GHOST_TAG_ALIASES` in your environment to automatically collapse synonymous tags to canonical names. Rely on this mechanism rather than manual cleanup.
 8. **Merge existing duplicates immediately**. If you discover two live tags that mean the same thing during your work, merge them on the spot with `--merge-tags` instead of leaving them for later.
 9. **Skip the check only when certain**. Use `--skip-tag-check` only if the user explicitly overrides the warning.
 
@@ -210,13 +213,13 @@ python3 scripts/ghost_publish.py --list-posts
 ### List posts with filters
 ```bash
 # Filter by tag slug
-python3 scripts/ghost_publish.py --list-posts --tag hermes
+python3 scripts/ghost_publish.py --list-posts --tag tag-slug
 
 # Filter by status
 python3 scripts/ghost_publish.py --list-posts --status draft
 
 # Combine tag + status
-python3 scripts/ghost_publish.py --list-posts --tag hermes --status published
+python3 scripts/ghost_publish.py --list-posts --tag tag-slug --status published
 
 # Custom page size and sort
 python3 scripts/ghost_publish.py --list-posts --limit 50 --page 2 --order "published_at desc"
@@ -276,8 +279,12 @@ Never skip step 1–2 and go straight to writing — always confirm the slug exi
   - Verify auto-generated slugs are human-readable before publishing
 - When updating existing posts, **always use `--find-slug` or `--update-id`** to avoid creating duplicates
 - Normalize markdown before publish so headings, blank lines, bullets, and numbered lists become clean HTML; never preserve raw duplicated list markers like `• - item` or `1. 1. item`.
-- When generating technical article content, default to objective writing: reduce subjective opinions, avoid labels like "simple/complex/easy/hard" unless attributed or clearly context-bound, and do not pre-judge the reader's knowledge.
-- Prefer concrete facts, process, constraints, results, evidence, pitfalls, and boundaries. Include these when they help the reader understand what was done and what the approach covers.
+- **Content quality (GEO)**: Every article must be optimized for both human readers and generative AI absorption. Before drafting any article body, read `references/content-rules.md` and select the appropriate structure from `references/technical-review-writing-guide.md`. The non-negotiable minimums are:
+  - One article = one clearly defined topic (statable in a single sentence)
+  - Headers answer user sub-questions, not generic labels ("Why X fails" not "Background")
+  - At least 2 of: definition, comparison, quantified data with named source, concrete example
+  - Core articles ≥ 1,500 words; focused articles ≥ 800 words; never publish < 300 words
+  - `meta_description` reads like a direct answer to the question the article addresses — not a marketing tagline
 
 ## Image Uploads
 
@@ -318,44 +325,37 @@ Author normalization (`_normalize_authors`):
 - Host: `GHOST_HOST` or `GHOST_ADMIN_HOST` or `GHOST_URL` or `GHOST_ADMIN_URL`
 - Admin API key (required for writes and admin reads): `GHOST_ADMIN_API_KEY` (preferred) or `GHOST_API_KEY`
 - Content API key (optional, for public-content reads): `GHOST_CONTENT_API_KEY` — currently unused by the helper script because the Admin API already covers all read operations needed for post lookup and browsing. Set this if you need to integrate with external tools that require the Content API key.
+- Tag aliases (optional): `GHOST_TAG_ALIASES` — JSON object mapping variant tag spellings to canonical names (e.g. `'{"AI Agent": "Agent"}'`). Applied automatically before any tag is written.
 
 ## Verification Checklist
 
-1. **Writing style**
+1. **GEO content quality** (check before publishing)
+   - Topic scope is narrow and can be stated in one sentence
+   - Each H2/H3 corresponds to a user sub-question, not a generic label
+   - Article contains at least 2 of: definition, comparison, quantified data, concrete example
+   - Every quantified claim has a named, traceable source
+   - Core articles: ≥ 1,500 words; focused articles: ≥ 800 words
+   - `meta_description` reads like an answer to a question, not a marketing tagline
+   - See `references/content-rules.md` and `references/technical-review-writing-guide.md` for full rules
+
+2. **Writing style**
    - Objective, factual, and concise
    - Avoid unnecessary hype, vague praise, or reader-assumption language
 
-2. **HTML rendering correctness**
+3. **HTML rendering correctness**
    - Headings render in the expected hierarchy
    - Bullet lists, numbered lists, blockquotes, tables, and code blocks render cleanly
    - Inline code, links, and emphasis are preserved after markdown-to-HTML conversion
 
-3. **Layout and readability**
+4. **Layout and readability**
    - Paragraph spacing is consistent
    - List nesting is clear
    - Code fences are closed and syntax highlighting is sensible
 
-4. **Clickable URL / link correctness**
+5. **Clickable URL / link correctness**
    - Use Markdown links (`[text](https://...)`) for source URLs you want readers to click
    - Avoid bare URLs when the display text matters
    - Confirm each URL points to the intended page and uses the correct anchor if present
-
-5. **Final verification**
-   - Open the draft in Ghost and inspect the rendered result
-
-## Browser Verification
-
-Always verify published Ghost drafts with PinchTab before marking complete:
-```bash
-PINCHTAB_URL=http://localhost:9868 pinchtab nav "<ghost-draft-url>"
-sleep 2
-PINCHTAB_URL=http://localhost:9868 pinchtab screenshot --full -o draft.png
-```
-Check for:
-- Tables rendered correctly (not as pipe-delimited text)
-- Blockquotes styled properly (not showing raw `>` symbols)
-- Bold text in table cells visible (e.g., `**MiMo-V2-Pro**` appears bold)
-- No unwanted `<hr>` lines
 
 ## Duplicate Check Before Publishing
 
@@ -370,36 +370,14 @@ Before creating a new post, always verify that no similar article already exists
 
 This manual check replaces any automated similarity scoring — the agent should use judgment based on title overlap and content intent.
 
-## Markdown-to-HTML Conversion History
-
-1. **Initial version**: Only handled headings, lists, code blocks, and inline formatting (bold/italic/links/images)
-2. **2026-04-03 fix #1**: Added support for:
-   - **Tables**: `| col1 | col2 |` → `<table>` with `<thead>` and `<tbody>`
-   - **Blockquotes**: `> text` → `<blockquote>` with recursive markdown parsing for nested content
-3. **2026-04-03 fix #2**: Fixed table cell inline formatting:
-   - **Root cause**: `parse_table()` was defined before `inline()` in the same function scope, but Python closure rules prevented access
-   - **Solution**: Pass `inline` as a parameter to `parse_table(lines, start_idx, inline_fn)`
-   - **Result**: `**bold**` in table cells now correctly converts to `<strong>bold</strong>`
-4. **2026-04-05 fix**: Added support for horizontal rules:
-   - `---` or `***` → `<hr />`
-5. **2026-04-10 fix**: Added symbol normalization to convert common LaTeX-style arrows (e.g., `$\rightarrow$`) to Unicode equivalents (`→`) to prevent raw LaTeX rendering in Ghost.
-6. **2026-04-11 fix**: Added tag management commands (`--list-tags`, `--merge-tags`, `--delete-empty-tags`), built-in tag aliases, and tag conflict detection to prevent tag proliferation.
-7. **2026-04-13 fix**: Added bulk metadata update (`--bulk-meta-file`) and allowed metadata-only updates for existing posts without requiring content re-upload.
-8. **2026-04-16 fix**: Added `--list-posts` and `--search` commands for post browsing and title keyword search. Improved `find_post` title lookup to use Admin API NQL filter first (avoids full list scan). Removed non-existent `--check-similar`/`--auto-suggest` flags from docs and replaced with a manual search-based duplicate-check workflow.
-
-If you encounter formatting issues in published Ghost articles:
-1. Check if the markdown uses tables, blockquotes, or inline formatting within tables
-2. Verify the current `markdown_to_html()` function handles them correctly
-3. Run a quick Python test before publishing:
-   ```python
-   from scripts.ghost_publish import markdown_to_html
-   html = markdown_to_html("| **A** | B |\n|---|---|\n| **C** | D |")
-   assert '<strong>' in html, "Bold not working in tables!"
-   ```
-
 ## References
 
+**Read before writing any article** (required for every content creation task):
+- `references/content-rules.md`: full GEO content rules — topic scope, header design, evidence density, source transparency, word count targets, content type priority, semantic alignment, and writing defaults.
+- `references/technical-review-writing-guide.md`: article structure templates (comparison, definition/explanation, how-to, factual reference) with GEO rationale and writing rules for each type.
+
+**Read on demand** (API behavior, edge cases, troubleshooting):
 - `references/ghost-docs.md`: current Ghost API behavior relevant to this skill.
-- `references/ghost-llms-full.txt`: comprehensive Ghost Admin API and Content API documentation for LLM/agent indexing. Useful for resolving edge cases, understanding API nuances, or when the skill behavior needs updating.
-- `references/content-rules.md`: content quality and writing rules for published articles.
+- `references/ghost-llms-full.txt`: comprehensive Ghost Admin API and Content API documentation for LLM/agent indexing.
 - `references/images-api.md`: notes on the Ghost images upload API.
+- `references/markdown-converter-changelog.md`: capability summary and fix history for the built-in `markdown_to_html()` function; read when debugging rendering issues.
