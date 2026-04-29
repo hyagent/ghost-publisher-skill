@@ -276,8 +276,12 @@ Never skip step 1–2 and go straight to writing — always confirm the slug exi
   - Verify auto-generated slugs are human-readable before publishing
 - When updating existing posts, **always use `--find-slug` or `--update-id`** to avoid creating duplicates
 - Normalize markdown before publish so headings, blank lines, bullets, and numbered lists become clean HTML; never preserve raw duplicated list markers like `• - item` or `1. 1. item`.
-- When generating technical article content, default to objective writing: reduce subjective opinions, avoid labels like "simple/complex/easy/hard" unless attributed or clearly context-bound, and do not pre-judge the reader's knowledge.
-- Prefer concrete facts, process, constraints, results, evidence, pitfalls, and boundaries. Include these when they help the reader understand what was done and what the approach covers.
+- **Content quality (GEO)**: Every article must be optimized for both human readers and generative AI absorption. Before drafting any article body, read `references/content-rules.md` and select the appropriate structure from `references/technical-review-writing-guide.md`. The non-negotiable minimums are:
+  - One article = one clearly defined topic (statable in a single sentence)
+  - Headers answer user sub-questions, not generic labels ("Why X fails" not "Background")
+  - At least 2 of: definition, comparison, quantified data with named source, concrete example
+  - Core articles ≥ 1,500 words; focused articles ≥ 800 words; never publish < 300 words
+  - `meta_description` reads like a direct answer to the question the article addresses — not a marketing tagline
 
 ## Image Uploads
 
@@ -392,7 +396,11 @@ If you encounter formatting issues in published Ghost articles:
 
 ## References
 
+**Read before writing any article** (required for every content creation task):
+- `references/content-rules.md`: full GEO content rules — topic scope, header design, evidence density, source transparency, word count targets, content type priority, semantic alignment, and writing defaults.
+- `references/technical-review-writing-guide.md`: article structure templates (comparison, definition/explanation, how-to, factual reference) with GEO rationale and writing rules for each type.
+
+**Read on demand** (API behavior, edge cases, troubleshooting):
 - `references/ghost-docs.md`: current Ghost API behavior relevant to this skill.
-- `references/ghost-llms-full.txt`: comprehensive Ghost Admin API and Content API documentation for LLM/agent indexing. Useful for resolving edge cases, understanding API nuances, or when the skill behavior needs updating.
-- `references/content-rules.md`: content quality and writing rules for published articles.
+- `references/ghost-llms-full.txt`: comprehensive Ghost Admin API and Content API documentation for LLM/agent indexing.
 - `references/images-api.md`: notes on the Ghost images upload API.
